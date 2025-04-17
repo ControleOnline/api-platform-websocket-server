@@ -14,43 +14,52 @@ class WebsocketClient
     public function __construct(
         private EntityManagerInterface $manager,
         private RequestStack $requestStack
-    ) {
-        self::$clients = new SplObjectStorage();
+    ) {}
+
+    public static function setClients(SplObjectStorage $clients): void
+    {
+        self::$clients = $clients;
     }
 
-    public function sendMessage(string $type, $message): void
+    public static function sendMessage(string $type, $message): void
     {
         $payload = json_encode(['type' => $type, 'message' => $message]);
-        $this->sendMessageToAll($payload);
+        self::sendMessageToAll($payload);
     }
 
-    public function addClient(ConnectionInterface $client): void
+    public static function addClient(ConnectionInterface $client): void
     {
-        self::$clients->attach($client);
+        if (self::$clients) {
+            self::$clients->attach($client);
+        }
     }
 
-    public function removeClient(ConnectionInterface $client): void
+    public static function removeClient(ConnectionInterface $client): void
     {
-        self::$clients->detach($client);
+        if (self::$clients) {
+            self::$clients->detach($client);
+        }
     }
 
-    public function getClients(): SplObjectStorage
+    public static function getClients(): ?SplObjectStorage
     {
         return self::$clients;
     }
 
-    public function sendMessageToAll(string $payload): void
+    private static function sendMessageToAll(string $payload): void
     {
-        $frame = $this->encodeWebSocketFrame($payload);
-        error_log('Clientes conectados: ' . count(self::$clients));
+        $frame = self::encodeWebSocketFrame($payload);
+        error_log('Clientes conectados: ' . (self::$clients ? count(self::$clients) : 0));
         error_log('Mensagem: ' . $payload);
 
-        foreach (self::$clients as $client) {
-            $client->write($frame);
+        if (self::$clients) {
+            foreach (self::$clients as $client) {
+                $client->write($frame);
+            }
         }
     }
 
-    private function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
+    private static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
     {
         $frameHead = [];
         $payloadLength = strlen($payload);
@@ -80,7 +89,7 @@ class WebsocketClient
         return pack('C*', ...$frameHead) . $payload;
     }
 
-    public function decodeWebSocketFrame(string $data): ?string
+    public static function decodeWebSocketFrame(string $data): ?string
     {
         $unmaskedPayload = '';
         $payloadOffset = 2;

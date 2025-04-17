@@ -11,18 +11,14 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use SplObjectStorage;
 
 #[AsCommand(
     name: 'websocket:start',
-    description: 'Inicia o servidor WebSocket com ReactPHP (com gerenciamento de conexões)'
+    description: 'Inicia o servidor WebSocket com ReactPHP (com gerenciamento estático de clientes)'
 )]
 class WebSocketServerCommand extends Command
 {
-    public function __construct(private WebsocketClient $connectionManager, ?string $name = null)
-    {
-        parent::__construct($name);
-    }
-
     protected function configure(): void
     {
         $this->addArgument('port', InputArgument::OPTIONAL, 'Porta para o servidor WebSocket', 8080);
@@ -31,10 +27,13 @@ class WebSocketServerCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $port = $input->getArgument('port');
-        $output->writeln("Iniciando servidor WebSocket ReactPHP na porta {$port} (com gerenciamento de conexões)...");
+        $output->writeln("Iniciando servidor WebSocket ReactPHP na porta {$port} (com gerenciamento estático de clientes)...");
 
         $loop = Loop::get();
         $socket = new Server("0.0.0.0:{$port}", $loop);
+
+        // Inicializa a propriedade estática $clients do WebsocketClient com uma nova instância
+        WebsocketClient::setClients(new SplObjectStorage());
 
         $socket->on('connection', function (ConnectionInterface $conn) use ($output) {
             $handshakeDone = false;
@@ -74,7 +73,7 @@ class WebSocketServerCommand extends Command
 
                             $conn->write($response);
                             $handshakeDone = true;
-                            $this->connectionManager->addClient($conn);
+                            WebsocketClient::addClient($conn); // Adiciona o cliente usando o método estático
                             $output->writeln("Nova conexão WebSocket estabelecida! ({$conn->resourceId})");
 
                             // Remove os headers do buffer para processar dados WebSocket futuros
@@ -82,7 +81,7 @@ class WebSocketServerCommand extends Command
 
                             // **Implementação básica da decodificação aqui (para receber mensagens do cliente)**
                             if (!empty($buffer)) {
-                                $decodedMessage = $this->connectionManager->decodeWebSocketFrame($buffer);
+                                $decodedMessage = WebsocketClient::decodeWebSocketFrame($buffer);
                                 if ($decodedMessage !== null) {
                                     $output->writeln("Mensagem inicial recebida do cliente {$conn->resourceId}: " . $decodedMessage);
                                     // Faça algo com a mensagem recebida
@@ -97,7 +96,7 @@ class WebSocketServerCommand extends Command
                         }
                     } else {
                         // Lógica para lidar com dados WebSocket APÓS o handshake (decodificação)
-                        $decodedMessage = $this->connectionManager->decodeWebSocketFrame($data);
+                        $decodedMessage = WebsocketClient::decodeWebSocketFrame($data);
                         if ($decodedMessage !== null) {
                             $output->writeln("Mensagem recebida do cliente {$conn->resourceId}: " . $decodedMessage);
                             // Faça algo com a mensagem recebida
@@ -110,12 +109,12 @@ class WebSocketServerCommand extends Command
             });
 
             $conn->on('close', function () use ($conn, $output) {
-                $this->connectionManager->removeClient($conn);
+                WebsocketClient::removeClient($conn); // Remove o cliente usando o método estático
                 $output->writeln("Conexão fechada! ({$conn->resourceId})");
             });
         });
 
-        $output->writeln('Servidor WebSocket ReactPHP iniciado (com gerenciamento de conexões)!');
+        $output->writeln('Servidor WebSocket ReactPHP iniciado (com gerenciamento estático de clientes)!');
         $loop->run();
 
         return Command::SUCCESS;
