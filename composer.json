@@ -16,5 +16,9 @@
       "email": "luiz.kim@controleonline.com"
     }
   ],
-  "require": {}
+  "require": {
+    "react/react": "*",
+    "react/event-loop": "*",
+    "react/socket": "*"
+  }
 }
