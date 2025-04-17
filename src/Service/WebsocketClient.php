@@ -2,50 +2,47 @@
 
 namespace ControleOnline\Service;
 
-use React\Socket\Connector;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
+use React\Socket\Connector;
 use Doctrine\ORM\EntityManagerInterface;
-use SplObjectStorage;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Psr\Log\LoggerInterface;
 
 class WebsocketClient
 {
-    private static $clients;
+    private static $clients = [];
 
-    public function __construct(
-        private EntityManagerInterface $manager,
-        private RequestStack $requestStack
-    ) {}
+    private $entityManager;
+    private $requestStack;
+    private $logger;
 
-    public static function setClients(SplObjectStorage $clients): void
+    public function __construct(EntityManagerInterface $entityManager = null, RequestStack $requestStack = null, LoggerInterface $logger = null)
     {
-        self::$clients = $clients;
-    }
-
-    public static function sendMessage(string $type, $message): void
-    {
-        $payload = json_encode(['type' => $type, 'message' => $message]);
-        self::sendMessageToAll($payload);
+        $this->entityManager = $entityManager;
+        $this->requestStack = $requestStack;
+        $this->logger = $logger;
     }
 
     public static function addClient(ConnectionInterface $client): void
     {
-        if (self::$clients) {
-            self::$clients->attach($client);
-        }
+        self::$clients[$client->resourceId] = $client;
     }
 
     public static function removeClient(ConnectionInterface $client): void
     {
-        if (self::$clients) {
-            self::$clients->detach($client);
-        }
+        unset(self::$clients[$client->resourceId]);
     }
 
-    public static function getClients(): ?SplObjectStorage
+    public static function getClients(): array
     {
         return self::$clients;
+    }
+
+    public static function sendMessage(string $type, string $message): void
+    {
+        $payload = json_encode(['type' => $type, 'message' => $message]);
+        self::sendMessageToAll($payload);
     }
 
     private static function sendMessageToAll(string $payload): void
@@ -53,19 +50,16 @@ class WebsocketClient
         $loop = Loop::get();
         $connector = new Connector($loop);
 
-        // Configuração do servidor WebSocket
         $host = '127.0.0.1';
         $port = 8080;
 
-        // Flags para rastrear o estado
         $messageSent = false;
         $error = null;
 
         $connector->connect("tcp://{$host}:{$port}")->then(
-            function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $host, $port) {
+            function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $loop, $host, $port) {
                 error_log('Conexão estabelecida com o servidor WebSocket');
 
-                // Realizar o handshake WebSocket como cliente
                 $secWebSocketKey = base64_encode(random_bytes(16));
                 $handshakeRequest = "GET / HTTP/1.1\r\n"
                     . "Host: {$host}:{$port}\r\n"
@@ -80,7 +74,7 @@ class WebsocketClient
                 $buffer = '';
                 $handshakeDone = false;
 
-                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone, &$messageSent, &$error, $secWebSocketKey) {
+                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone, &$messageSent, &$error, $secWebSocketKey, $loop) {
                     $buffer .= $data;
                     error_log('Dados recebidos: ' . $data);
 
@@ -90,12 +84,10 @@ class WebsocketClient
                         $isValidHandshake = false;
                         $secWebSocketAccept = null;
 
-                        // Verificar status HTTP 101
                         if (preg_match('/HTTP\/1\.1 101/', $statusLine)) {
                             $hasUpgrade = false;
                             $hasConnection = false;
 
-                            // Analisar cabeçalhos
                             foreach ($headers as $header) {
                                 if (preg_match('/^Upgrade:\s*websocket/i', $header)) {
                                     $hasUpgrade = true;
@@ -108,7 +100,6 @@ class WebsocketClient
                                 }
                             }
 
-                            // Validar Sec-WebSocket-Accept
                             $expectedAccept = base64_encode(sha1($secWebSocketKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
                             if ($hasUpgrade && $hasConnection && $secWebSocketAccept === $expectedAccept) {
                                 $isValidHandshake = true;
@@ -135,7 +126,11 @@ class WebsocketClient
                             $conn->write($frame);
                             error_log('Mensagem enviada: ' . $payload);
                             $messageSent = true;
-                            $conn->close();
+
+                            $loop->addTimer(1, function () use ($conn) {
+                                $conn->close();
+                                error_log('Conexão fechada após atraso');
+                            });
                         } else {
                             error_log($error);
                             $conn->close();
@@ -161,17 +156,15 @@ class WebsocketClient
             }
         );
 
-        // Adicionar um timer para limitar a execução do loop
-        $timeout = 5; // Timeout de 5 segundos
+        $timeout = 5;
         $loop->addTimer($timeout, function () use ($loop, &$error, &$messageSent) {
             if (!$messageSent && !$error) {
                 $error = 'Timeout atingido ao tentar enviar mensagem';
                 error_log($error);
             }
-            $loop->stop(); // Parar o loop explicitamente
+            $loop->stop();
         });
 
-        // Executar o loop até que a mensagem seja enviada ou ocorra um erro
         $loop->run();
 
         if (!$messageSent) {
@@ -179,20 +172,16 @@ class WebsocketClient
         }
     }
 
-
-    private static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
+    public static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
     {
         $frameHead = [];
         $payloadLength = strlen($payload);
 
-        // Opcode (0x1 para texto) e bit FIN
         $frameHead[0] = 0x80 | $opcode;
 
-        // Mascaramento (obrigatório para clientes)
         $mask = true;
         $maskingKey = $mask ? random_bytes(4) : '';
 
-        // Definir comprimento do payload
         if ($payloadLength > 65535) {
             $frameHead[1] = ($mask ? 0x80 : 0) | 0x7F;
             $frameHead[2] = ($payloadLength >> 56) & 0xFF;
@@ -211,7 +200,6 @@ class WebsocketClient
             $frameHead[1] = ($mask ? 0x80 : 0) | $payloadLength;
         }
 
-        // Aplicar máscara ao payload
         $maskedPayload = $payload;
         if ($mask) {
             for ($i = 0; $i < $payloadLength; $i++) {
@@ -219,6 +207,7 @@ class WebsocketClient
             }
         }
 
+        error_log('Enviando frame WebSocket: ' . bin2hex(pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload));
         return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
