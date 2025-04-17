@@ -9,12 +9,14 @@ use Symfony\Component\HttpFoundation\RequestStack;
 
 class WebsocketClient
 {
+    private $clients;
 
     public function __construct(
         private EntityManagerInterface $manager,
-        private RequestStack $requestStack,
-        private SplObjectStorage $clients
-    ) {}
+        private RequestStack $requestStack
+    ) {
+        $this->clients = new SplObjectStorage();
+    }
 
     public function sendMessage(string $type, $message): void
     {
