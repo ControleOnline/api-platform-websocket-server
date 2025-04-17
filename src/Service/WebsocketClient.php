@@ -2,6 +2,8 @@
 
 namespace ControleOnline\Service;
 
+use React\Socket\Connector;
+use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use SplObjectStorage;
@@ -48,15 +50,80 @@ class WebsocketClient
 
     private static function sendMessageToAll(string $payload): void
     {
-        $frame = self::encodeWebSocketFrame($payload);
-        error_log('Clientes conectados: ' . (self::$clients ? count(self::$clients) : 0));
-        error_log('Mensagem: ' . $payload);
+        $loop = Loop::get();
+        $connector = new Connector($loop);
 
-        if (self::$clients) {
-            foreach (self::$clients as $client) {
-                $client->write($frame);
+        // Conectar ao servidor WebSocket (ajuste o host e a porta conforme necessário)
+        $host = '127.0.0.1';
+        $port = 8080;
+
+        $connector->connect("tcp://{$host}:{$port}")->then(
+            function (ConnectionInterface $conn) use ($payload, $loop) {
+                // Realizar o handshake WebSocket como cliente
+                $secWebSocketKey = base64_encode(random_bytes(16));
+                $handshakeRequest = "GET / HTTP/1.1\r\n"
+                    . "Host: 127.0.0.1:8080\r\n"
+                    . "Upgrade: websocket\r\n"
+                    . "Connection: Upgrade\r\n"
+                    . "Sec-WebSocket-Key: {$secWebSocketKey}\r\n"
+                    . "Sec-WebSocket-Version: 13\r\n\r\n";
+
+                $conn->write($handshakeRequest);
+
+                $buffer = '';
+                $handshakeDone = false;
+
+                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone) {
+                    $buffer .= $data;
+
+                    if (!$handshakeDone) {
+                        // Verificar se o handshake foi concluído
+                        if (strpos($buffer, "\r\n\r\n") !== false) {
+                            $headers = explode("\r\n", $buffer);
+                            $statusLine = array_shift($headers);
+                            $isValidHandshake = false;
+
+                            // Verificar se a resposta é um handshake WebSocket válido
+                            if (preg_match('/HTTP\/1\.1 101/', $statusLine)) {
+                                foreach ($headers as $header) {
+                                    if (
+                                        stripos($header, 'Upgrade: websocket') !== false &&
+                                        stripos($header, 'Connection: Upgrade') !== false
+                                    ) {
+                                        $isValidHandshake = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if ($isValidHandshake) {
+                                $handshakeDone = true;
+                                // Enunless($payload !== '') {
+                                // Enviar a mensagem codificada como frame WebSocket
+                                $frame = self::encodeWebSocketFrame($payload);
+                                $conn->write($frame);
+                                // Fechar a conexão após enviar a mensagem
+                                $conn->close();
+                            } else {
+                                error_log('Falha no handshake WebSocket');
+                                $conn->close();
+                            }
+                        }
+                    }
+                });
+
+                $conn->on('close', function () {
+                    error_log('Conexão com o servidor WebSocket fechada');
+                });
+
+                $conn->on('error', function (\Exception $e) {
+                    error_log('Erro na conexão WebSocket: ' . $e->getMessage());
+                });
+            },
+            function (\Exception $e) {
+                error_log('Falha ao conectar ao servidor WebSocket: ' . $e->getMessage());
             }
-        }
+        );
     }
 
     private static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string

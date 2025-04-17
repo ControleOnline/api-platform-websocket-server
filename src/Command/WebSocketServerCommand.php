@@ -32,7 +32,7 @@ class WebSocketServerCommand extends Command
         $loop = Loop::get();
         $socket = new Server("0.0.0.0:{$port}", $loop);
 
-        // Inicializa a propriedade estática $clients do WebsocketClient com uma nova instância
+        // Inicializa a propriedade estática $clients do WebsocketClient
         WebsocketClient::setClients(new SplObjectStorage());
 
         $socket->on('connection', function (ConnectionInterface $conn) use ($output) {
@@ -73,7 +73,7 @@ class WebSocketServerCommand extends Command
 
                             $conn->write($response);
                             $handshakeDone = true;
-                            WebsocketClient::addClient($conn); // Adiciona o cliente usando o método estático
+                            WebsocketClient::addClient($conn); // Adiciona o cliente APÓS o handshake
                             $output->writeln("Nova conexão WebSocket estabelecida! ({$conn->resourceId})");
 
                             // Remove os headers do buffer para processar dados WebSocket futuros
@@ -109,7 +109,7 @@ class WebSocketServerCommand extends Command
             });
 
             $conn->on('close', function () use ($conn, $output) {
-                WebsocketClient::removeClient($conn); // Remove o cliente usando o método estático
+                WebsocketClient::removeClient($conn); // Remove o cliente ao fechar a conexão
                 $output->writeln("Conexão fechada! ({$conn->resourceId})");
             });
         });
