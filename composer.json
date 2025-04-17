@@ -1,5 +1,5 @@
 {
-    "name": "controleonline/websocket"
+    "name": "controleonline/websocket-server"
   , "type": "library"
   , "description": "PHP WebSocket library"
   , "keywords": ["WebSockets", "Server", "Ratchet", "Sockets", "WebSocket"]
