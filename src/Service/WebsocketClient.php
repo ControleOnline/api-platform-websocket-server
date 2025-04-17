@@ -80,7 +80,7 @@ class WebsocketClient
                 $buffer = '';
                 $handshakeDone = false;
 
-                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone, &$messageSent, &$error) {
+                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone, &$messageSent, &$error, $secWebSocketKey) {
                     $buffer .= $data;
                     error_log('Dados recebidos: ' . $data);
 
@@ -88,17 +88,44 @@ class WebsocketClient
                         $headers = explode("\r\n", $buffer);
                         $statusLine = array_shift($headers);
                         $isValidHandshake = false;
+                        $secWebSocketAccept = null;
 
+                        // Verificar status HTTP 101
                         if (preg_match('/HTTP\/1\.1 101/', $statusLine)) {
+                            $hasUpgrade = false;
+                            $hasConnection = false;
+
+                            // Analisar cabeçalhos
                             foreach ($headers as $header) {
-                                if (
-                                    stripos($header, 'Upgrade: websocket') !== false &&
-                                    stripos($header, 'Connection: Upgrade') !== false
-                                ) {
-                                    $isValidHandshake = true;
-                                    break;
+                                if (preg_match('/^Upgrade:\s*websocket/i', $header)) {
+                                    $hasUpgrade = true;
+                                }
+                                if (preg_match('/^Connection:\s*Upgrade/i', $header)) {
+                                    $hasConnection = true;
+                                }
+                                if (preg_match('/^Sec-WebSocket-Accept:\s*(.+)/i', $header, $matches)) {
+                                    $secWebSocketAccept = trim($matches[1]);
                                 }
                             }
+
+                            // Validar Sec-WebSocket-Accept
+                            $expectedAccept = base64_encode(sha1($secWebSocketKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
+                            if ($hasUpgrade && $hasConnection && $secWebSocketAccept === $expectedAccept) {
+                                $isValidHandshake = true;
+                            } else {
+                                $error = 'Validação do handshake falhou: ';
+                                if (!$hasUpgrade) {
+                                    $error .= 'Cabeçalho Upgrade ausente ou inválido; ';
+                                }
+                                if (!$hasConnection) {
+                                    $error .= 'Cabeçalho Connection ausente ou inválido; ';
+                                }
+                                if ($secWebSocketAccept !== $expectedAccept) {
+                                    $error .= "Sec-WebSocket-Accept inválido (esperado: $expectedAccept, recebido: $secWebSocketAccept); ";
+                                }
+                            }
+                        } else {
+                            $error = 'Resposta HTTP inválida: ' . $statusLine;
                         }
 
                         if ($isValidHandshake) {
@@ -110,8 +137,7 @@ class WebsocketClient
                             $messageSent = true;
                             $conn->close();
                         } else {
-                            $error = 'Falha no handshake WebSocket';
-                            error_log($error . ': ' . $buffer);
+                            error_log($error);
                             $conn->close();
                         }
                     }
@@ -152,6 +178,7 @@ class WebsocketClient
             error_log('Falha ao enviar mensagem: ' . ($error ?: 'Erro desconhecido'));
         }
     }
+
 
     private static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
     {
