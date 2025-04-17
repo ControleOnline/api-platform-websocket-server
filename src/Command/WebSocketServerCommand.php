@@ -13,11 +13,11 @@ use ControleOnline\Service\WebsocketClient;
 
 class WebSocketServerCommand extends Command
 {
-    protected static $defaultName = 'websocket:start';
 
     protected function configure()
     {
         $this
+            ->setName('websocket:start')
             ->setDescription('Starts the WebSocket server')
             ->addArgument('port', InputArgument::OPTIONAL, 'Port to listen on', 8080);
     }
@@ -49,9 +49,11 @@ class WebSocketServerCommand extends Command
                             }
                         }
 
-                        if (isset($headers['upgrade']) && strtolower($headers['upgrade']) === 'websocket' &&
+                        if (
+                            isset($headers['upgrade']) && strtolower($headers['upgrade']) === 'websocket' &&
                             isset($headers['connection']) && strtolower($headers['connection']) === 'upgrade' &&
-                            isset($headers['sec-websocket-key']) && isset($headers['sec-websocket-version']) && $headers['sec-websocket-version'] === '13') {
+                            isset($headers['sec-websocket-key']) && isset($headers['sec-websocket-version']) && $headers['sec-websocket-version'] === '13'
+                        ) {
 
                             $secWebSocketKey = $headers['sec-websocket-key'];
                             $magicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
