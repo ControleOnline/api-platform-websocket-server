@@ -53,77 +53,104 @@ class WebsocketClient
         $loop = Loop::get();
         $connector = new Connector($loop);
 
-        // Conectar ao servidor WebSocket (ajuste o host e a porta conforme necessário)
+        // Configuração do servidor WebSocket
         $host = '127.0.0.1';
         $port = 8080;
 
+        // Flags para rastrear o estado
+        $messageSent = false;
+        $error = null;
+
         $connector->connect("tcp://{$host}:{$port}")->then(
-            function (ConnectionInterface $conn) use ($payload, $loop) {
+            function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $host, $port) {
+                error_log('Conexão estabelecida com o servidor WebSocket');
+
                 // Realizar o handshake WebSocket como cliente
                 $secWebSocketKey = base64_encode(random_bytes(16));
                 $handshakeRequest = "GET / HTTP/1.1\r\n"
-                    . "Host: 127.0.0.1:8080\r\n"
+                    . "Host: {$host}:{$port}\r\n"
                     . "Upgrade: websocket\r\n"
                     . "Connection: Upgrade\r\n"
                     . "Sec-WebSocket-Key: {$secWebSocketKey}\r\n"
                     . "Sec-WebSocket-Version: 13\r\n\r\n";
 
                 $conn->write($handshakeRequest);
+                error_log('Handshake enviado: ' . $handshakeRequest);
 
                 $buffer = '';
                 $handshakeDone = false;
 
-                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone) {
+                $conn->on('data', function ($data) use ($conn, $payload, &$buffer, &$handshakeDone, &$messageSent, &$error) {
                     $buffer .= $data;
+                    error_log('Dados recebidos: ' . $data);
 
-                    if (!$handshakeDone) {
-                        // Verificar se o handshake foi concluído
-                        if (strpos($buffer, "\r\n\r\n") !== false) {
-                            $headers = explode("\r\n", $buffer);
-                            $statusLine = array_shift($headers);
-                            $isValidHandshake = false;
+                    if (!$handshakeDone && strpos($buffer, "\r\n\r\n") !== false) {
+                        $headers = explode("\r\n", $buffer);
+                        $statusLine = array_shift($headers);
+                        $isValidHandshake = false;
 
-                            // Verificar se a resposta é um handshake WebSocket válido
-                            if (preg_match('/HTTP\/1\.1 101/', $statusLine)) {
-                                foreach ($headers as $header) {
-                                    if (
-                                        stripos($header, 'Upgrade: websocket') !== false &&
-                                        stripos($header, 'Connection: Upgrade') !== false
-                                    ) {
-                                        $isValidHandshake = true;
-                                        break;
-                                    }
+                        if (preg_match('/HTTP\/1\.1 101/', $statusLine)) {
+                            foreach ($headers as $header) {
+                                if (
+                                    stripos($header, 'Upgrade: websocket') !== false &&
+                                    stripos($header, 'Connection: Upgrade') !== false
+                                ) {
+                                    $isValidHandshake = true;
+                                    break;
                                 }
                             }
+                        }
 
-                            if ($isValidHandshake) {
-                                $handshakeDone = true;
-                                // Enunless($payload !== '') {
-                                // Enviar a mensagem codificada como frame WebSocket
-                                $frame = self::encodeWebSocketFrame($payload);
-                                $conn->write($frame);
-                                // Fechar a conexão após enviar a mensagem
-                                $conn->close();
-                            } else {
-                                error_log('Falha no handshake WebSocket');
-                                $conn->close();
-                            }
+                        if ($isValidHandshake) {
+                            $handshakeDone = true;
+                            error_log('Handshake WebSocket bem-sucedido');
+                            $frame = self::encodeWebSocketFrame($payload);
+                            $conn->write($frame);
+                            error_log('Mensagem enviada: ' . $payload);
+                            $messageSent = true;
+                            $conn->close();
+                        } else {
+                            $error = 'Falha no handshake WebSocket';
+                            error_log($error . ': ' . $buffer);
+                            $conn->close();
                         }
                     }
                 });
 
-                $conn->on('close', function () {
+                $conn->on('close', function () use (&$error, &$messageSent) {
                     error_log('Conexão com o servidor WebSocket fechada');
+                    if (!$messageSent && !$error) {
+                        $error = 'Conexão fechada antes de enviar a mensagem';
+                    }
                 });
 
-                $conn->on('error', function (\Exception $e) {
-                    error_log('Erro na conexão WebSocket: ' . $e->getMessage());
+                $conn->on('error', function (\Exception $e) use (&$error) {
+                    $error = 'Erro na conexão WebSocket: ' . $e->getMessage();
+                    error_log($error);
                 });
             },
-            function (\Exception $e) {
-                error_log('Falha ao conectar ao servidor WebSocket: ' . $e->getMessage());
+            function (\Exception $e) use (&$error) {
+                $error = 'Falha ao conectar ao servidor WebSocket: ' . $e->getMessage();
+                error_log($error);
             }
         );
+
+        // Adicionar um timer para limitar a execução do loop
+        $timeout = 5; // Timeout de 5 segundos
+        $loop->addTimer($timeout, function () use ($loop, &$error, &$messageSent) {
+            if (!$messageSent && !$error) {
+                $error = 'Timeout atingido ao tentar enviar mensagem';
+                error_log($error);
+            }
+            $loop->stop(); // Parar o loop explicitamente
+        });
+
+        // Executar o loop até que a mensagem seja enviada ou ocorra um erro
+        $loop->run();
+
+        if (!$messageSent) {
+            error_log('Falha ao enviar mensagem: ' . ($error ?: 'Erro desconhecido'));
+        }
     }
 
     private static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
@@ -131,10 +158,8 @@ class WebsocketClient
         $frameHead = [];
         $payloadLength = strlen($payload);
 
-        // Opcode (0x1 para texto)
         $frameHead[0] = 0x80 | $opcode;
 
-        // Mascaramento (sempre 0 para o servidor) e comprimento da carga
         if ($payloadLength > 65535) {
             $frameHead[1] = 0x7F;
             $frameHead[2] = ($payloadLength >> 56) & 0xFF;
