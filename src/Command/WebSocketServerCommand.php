@@ -18,7 +18,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 class WebSocketServerCommand extends Command
 {
-    public function __construct(private WebsocketClient $connectionManager, string $name)
+    public function __construct(private WebsocketClient $connectionManager, ?string $name = null)
     {
         parent::__construct($name);
     }
