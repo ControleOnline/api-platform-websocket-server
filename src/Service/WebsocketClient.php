@@ -34,7 +34,7 @@ class WebsocketClient
         $this->clients->detach($client);
     }
 
-    public function getClients(): \SplObjectStorage
+    public function getClients(): SplObjectStorage
     {
         return $this->clients;
     }
@@ -42,6 +42,9 @@ class WebsocketClient
     public function sendMessageToAll(string $payload): void
     {
         $frame = $this->encodeWebSocketFrame($payload);
+        error_log('Clientes conectados: ' . count($this->clients));
+        error_log('Mensagem: ' . $payload);
+
         foreach ($this->clients as $client) {
             $client->write($frame);
         }
