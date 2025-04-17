@@ -9,13 +9,13 @@ use Symfony\Component\HttpFoundation\RequestStack;
 
 class WebsocketClient
 {
-    private $clients;
+    private static $clients;
 
     public function __construct(
         private EntityManagerInterface $manager,
         private RequestStack $requestStack
     ) {
-        $this->clients = new SplObjectStorage();
+        self::$clients = new SplObjectStorage();
     }
 
     public function sendMessage(string $type, $message): void
@@ -26,26 +26,26 @@ class WebsocketClient
 
     public function addClient(ConnectionInterface $client): void
     {
-        $this->clients->attach($client);
+        self::$clients->attach($client);
     }
 
     public function removeClient(ConnectionInterface $client): void
     {
-        $this->clients->detach($client);
+        self::$clients->detach($client);
     }
 
     public function getClients(): SplObjectStorage
     {
-        return $this->clients;
+        return self::$clients;
     }
 
     public function sendMessageToAll(string $payload): void
     {
         $frame = $this->encodeWebSocketFrame($payload);
-        error_log('Clientes conectados: ' . count($this->clients));
+        error_log('Clientes conectados: ' . count(self::$clients));
         error_log('Mensagem: ' . $payload);
 
-        foreach ($this->clients as $client) {
+        foreach (self::$clients as $client) {
             $client->write($frame);
         }
     }
