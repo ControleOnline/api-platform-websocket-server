@@ -12,7 +12,9 @@ class WebSocketServerCommand extends Command
 
     public function __construct(
         private WebsocketServer $websocketServer
-    ) {}
+    ) {
+        parent::__construct();
+    }
     protected function configure()
     {
         $this
