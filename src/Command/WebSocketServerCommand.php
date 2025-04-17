@@ -36,11 +36,13 @@ class WebSocketServerCommand extends Command
         WebsocketClient::setClients(new SplObjectStorage());
 
         $socket->on('connection', function (ConnectionInterface $conn) use ($output) {
+            $output->writeln("Nova conexão recebida ({$conn->resourceId})");
             $handshakeDone = false;
             $buffer = '';
 
             $conn->on('data', function ($data) use ($conn, $output, &$handshakeDone, &$buffer) {
                 $buffer .= $data;
+                $output->writeln("Dados brutos recebidos do cliente {$conn->resourceId}: " . bin2hex($data));
 
                 if (!$handshakeDone) {
                     // Tenta encontrar o final dos headers HTTP (\r\n\r\n)
@@ -79,31 +81,46 @@ class WebSocketServerCommand extends Command
                             // Remove os headers do buffer para processar dados WebSocket futuros
                             $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
 
-                            // **Implementação básica da decodificação aqui (para receber mensagens do cliente)**
+                            // Processar dados WebSocket iniciais, se houver
                             if (!empty($buffer)) {
+                                $output->writeln("Processando dados WebSocket iniciais: " . bin2hex($buffer));
                                 $decodedMessage = WebsocketClient::decodeWebSocketFrame($buffer);
                                 if ($decodedMessage !== null) {
                                     $output->writeln("Mensagem inicial recebida do cliente {$conn->resourceId}: " . $decodedMessage);
-                                    // Faça algo com a mensagem recebida
+                                    // Retransmitir a mensagem para todos os clientes
+                                    $frame = WebsocketClient::encodeWebSocketFrame($decodedMessage);
+                                    foreach (WebsocketClient::getClients() as $client) {
+                                        if ($client !== $conn) {
+                                            $client->write($frame);
+                                            $output->writeln("Mensagem retransmitida para cliente {$client->resourceId}: " . $decodedMessage);
+                                        }
+                                    }
                                 } else {
-                                    $output->writeln("Erro ao decodificar frame inicial do cliente {$conn->resourceId}. Fechando conexão.");
-                                    $conn->close();
+                                    $output->writeln("Erro ao decodificar frame inicial do cliente {$conn->resourceId}: " . bin2hex($buffer));
                                 }
                             }
                         } else {
-                            $output->writeln("Requisição de handshake inválida. Fechando conexão.");
+                            $output->writeln("Requisição de handshake inválida. Fechando conexão ({$conn->resourceId}).");
                             $conn->close();
                         }
+                    }
+                } else {
+                    // Lógica para dados WebSocket após o handshake
+                    $output->writeln("Processando dados WebSocket: " . bin2hex($buffer));
+                    $decodedMessage = WebsocketClient::decodeWebSocketFrame($buffer);
+                    if ($decodedMessage !== null) {
+                        $output->writeln("Mensagem recebida do cliente {$conn->resourceId}: " . $decodedMessage);
+                        // Retransmitir a mensagem para todos os clientes
+                        $frame = WebsocketClient::encodeWebSocketFrame($decodedMessage);
+                        foreach (WebsocketClient::getClients() as $client) {
+                            if ($client !== $conn) {
+                                $client->write($frame);
+                                $output->writeln("Mensagem retransmitida para cliente {$client->resourceId}: " . $decodedMessage);
+                            }
+                        }
+                        $buffer = ''; // Limpar o buffer após processar
                     } else {
-                        // Lógica para lidar com dados WebSocket APÓS o handshake (decodificação)
-                        $decodedMessage = WebsocketClient::decodeWebSocketFrame($data);
-                        if ($decodedMessage !== null) {
-                            $output->writeln("Mensagem recebida do cliente {$conn->resourceId}: " . $decodedMessage);
-                            // Faça algo com a mensagem recebida
-                        } else {
-                            $output->writeln("Erro ao decodificar frame WebSocket do cliente {$conn->resourceId}. Fechando conexão.");
-                            $conn->close();
-                        }
+                        $output->writeln("Erro ao decodificar frame WebSocket do cliente {$conn->resourceId}: " . bin2hex($buffer));
                     }
                 }
             });

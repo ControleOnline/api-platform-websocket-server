@@ -185,10 +185,16 @@ class WebsocketClient
         $frameHead = [];
         $payloadLength = strlen($payload);
 
+        // Opcode (0x1 para texto) e bit FIN
         $frameHead[0] = 0x80 | $opcode;
 
+        // Mascaramento (obrigatório para clientes)
+        $mask = true;
+        $maskingKey = $mask ? random_bytes(4) : '';
+
+        // Definir comprimento do payload
         if ($payloadLength > 65535) {
-            $frameHead[1] = 0x7F;
+            $frameHead[1] = ($mask ? 0x80 : 0) | 0x7F;
             $frameHead[2] = ($payloadLength >> 56) & 0xFF;
             $frameHead[3] = ($payloadLength >> 48) & 0xFF;
             $frameHead[4] = ($payloadLength >> 40) & 0xFF;
@@ -198,47 +204,64 @@ class WebsocketClient
             $frameHead[8] = ($payloadLength >> 8) & 0xFF;
             $frameHead[9] = $payloadLength & 0xFF;
         } elseif ($payloadLength > 125) {
-            $frameHead[1] = 0x7E;
+            $frameHead[1] = ($mask ? 0x80 : 0) | 0x7E;
             $frameHead[2] = ($payloadLength >> 8) & 0xFF;
             $frameHead[3] = $payloadLength & 0xFF;
         } else {
-            $frameHead[1] = $payloadLength;
+            $frameHead[1] = ($mask ? 0x80 : 0) | $payloadLength;
         }
 
-        return pack('C*', ...$frameHead) . $payload;
+        // Aplicar máscara ao payload
+        $maskedPayload = $payload;
+        if ($mask) {
+            for ($i = 0; $i < $payloadLength; $i++) {
+                $maskedPayload[$i] = $payload[$i] ^ $maskingKey[$i % 4];
+            }
+        }
+
+        return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
     public static function decodeWebSocketFrame(string $data): ?string
     {
+        error_log('Decodificando frame WebSocket: ' . bin2hex($data));
         $unmaskedPayload = '';
         $payloadOffset = 2;
         $masked = (ord($data[1]) >> 7) & 0x1;
         $payloadLength = ord($data[1]) & 0x7F;
 
+        error_log("Máscara: $masked, Comprimento do payload: $payloadLength");
+
         if ($payloadLength === 126) {
             $payloadOffset = 4;
             $payloadLength = unpack('n', substr($data, 2, 2))[1];
+            error_log("Payload estendido (16 bits): $payloadLength");
         } elseif ($payloadLength === 127) {
             $payloadOffset = 10;
             $payloadLength = unpack('J', substr($data, 2, 8))[1];
+            error_log("Payload estendido (64 bits): $payloadLength");
         }
 
         if ($masked) {
             if (strlen($data) < $payloadOffset + 4 + $payloadLength) {
-                return null; // Frame incompleto
+                error_log('Frame incompleto: tamanho insuficiente');
+                return null;
             }
             $maskingKey = substr($data, $payloadOffset, 4);
             $payload = substr($data, $payloadOffset + 4, $payloadLength);
+            error_log('Chave de máscara: ' . bin2hex($maskingKey));
             for ($i = 0; $i < $payloadLength; $i++) {
                 $unmaskedPayload .= $payload[$i] ^ $maskingKey[$i % 4];
             }
         } else {
             if (strlen($data) < $payloadOffset + $payloadLength) {
-                return null; // Frame incompleto
+                error_log('Frame incompleto: tamanho insuficiente (sem máscara)');
+                return null;
             }
             $unmaskedPayload = substr($data, $payloadOffset, $payloadLength);
         }
 
+        error_log('Payload decodificado: ' . $unmaskedPayload);
         return $unmaskedPayload;
     }
 }
