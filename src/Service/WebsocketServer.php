@@ -26,7 +26,7 @@ class WebsocketServer
             $handshakeDone = false;
             $buffer = '';
             $deviceId = null;
-            $self = self::class; // Mantendo a declaração de $self
+            $self = self::class;
 
             $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
                 $buffer .= $data;
@@ -38,19 +38,17 @@ class WebsocketServer
                         return;
                     }
 
-                    $headers = $self::parseHeaders($buffer); // Usando $self::
+                    $headers = $self::parseHeaders($buffer);
                     error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
 
-                    // Tenta obter o device_id do cabeçalho 'X-Device-ID'
                     if (isset($headers['x-device-id'])) {
                         $deviceId = trim($headers['x-device-id']);
                         error_log("Servidor: Extraído device_id do cabeçalho X-Device-ID: $deviceId");
                     } else {
                         error_log("Servidor: Nenhum device_id encontrado no cabeçalho X-Device-ID");
-                        // Removendo a lógica de leitura da query string (opcional)
                     }
 
-                    $response = $self::generateHandshakeResponse($headers); // Usando $self::
+                    $response = $self::generateHandshakeResponse($headers);
                     error_log("Servidor: Resposta de handshake gerada:\n" . $response);
 
                     if ($response === null) {
