@@ -26,7 +26,7 @@ class WebsocketServer
             $handshakeDone = false;
             $buffer = '';
             $deviceId = null;
-            $self = self::class;
+            $self = self::class; // Mantendo a declaração de $self
 
             $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
                 $buffer .= $data;
@@ -38,20 +38,19 @@ class WebsocketServer
                         return;
                     }
 
-                    $lines = explode("\r\n", $buffer);
-                    $requestLine = $lines[0];
-                    error_log("Servidor: Linha de requisição completa: " . $requestLine); // Log da linha completa
+                    $headers = $self::parseHeaders($buffer); // Usando $self::
+                    error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
 
-                    if (preg_match('/GET \/\?device_id=([^ ]+)/', $requestLine, $matches)) {
-                        $deviceId = urldecode($matches[1]);
-                        error_log("Servidor: Extraído device_id da query string: $deviceId");
+                    // Tenta obter o device_id do cabeçalho 'X-Device-ID'
+                    if (isset($headers['x-device-id'])) {
+                        $deviceId = trim($headers['x-device-id']);
+                        error_log("Servidor: Extraído device_id do cabeçalho X-Device-ID: $deviceId");
                     } else {
-                        error_log("Servidor: Nenhum device_id encontrado na query string");
+                        error_log("Servidor: Nenhum device_id encontrado no cabeçalho X-Device-ID");
+                        // Removendo a lógica de leitura da query string (opcional)
                     }
 
-                    $headers = $self::parseHeaders($buffer);
-                    error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
-                    $response = $self::generateHandshakeResponse($headers);
+                    $response = $self::generateHandshakeResponse($headers); // Usando $self::
                     error_log("Servidor: Resposta de handshake gerada:\n" . $response);
 
                     if ($response === null) {
