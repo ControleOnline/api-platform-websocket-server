@@ -29,31 +29,26 @@ class WebsocketClient
         $messageSent = false;
         $error = null;
 
+        error_log("Iniciando conexão com $host:$port");
         $connector->connect("tcp://{$host}:{$port}")->then(
             function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $loop, $host, $port) {
                 error_log("Conexão TCP estabelecida com $host:$port");
 
                 try {
                     $secWebSocketKey = base64_encode(random_bytes(16));
+                    error_log("Chave WebSocket gerada: $secWebSocketKey");
+
                     $request = $this->generateHandshakeRequest($host, $port, $secWebSocketKey);
                     error_log("Requisição de handshake gerada:\n$request");
 
-                    // Verificar se a requisição é válida antes de enviar
-                    if (empty($request) || !is_string($request)) {
+                    if (empty($request) || !is_string($request) || strpos($request, "GET /") === false) {
                         $error = "Requisição de handshake inválida ou vazia";
                         error_log($error);
                         $conn->close();
                         return;
                     }
 
-                    // Enviar a requisição
-                    $writeResult = $conn->write($request);
-                    if ($writeResult === false) {
-                        $error = "Falha ao enviar a requisição de handshake";
-                        error_log($error);
-                        $conn->close();
-                        return;
-                    }
+                    $conn->write($request);
                     error_log("Requisição de handshake enviada com sucesso");
                 } catch (Exception $e) {
                     $error = "Erro ao gerar ou enviar handshake: " . $e->getMessage();
