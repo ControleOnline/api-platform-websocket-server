@@ -18,7 +18,6 @@ class WebsocketServer
         private WebsocketMessage $websocketMessage
     ) {}
 
-
     public function init()
     {
         $socket = new SocketServer("0.0.0.0:8080", [], Loop::get());
@@ -26,8 +25,10 @@ class WebsocketServer
         $socket->on('connection', function (ConnectionInterface $conn) {
             $handshakeDone = false;
             $buffer = '';
+            $deviceId = null;
+            $self = self::class;
 
-            $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer) {
+            $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
                 $buffer .= $data;
                 error_log("Servidor recebeu dados:\n" . $data);
 
@@ -37,9 +38,18 @@ class WebsocketServer
                         return;
                     }
 
-                    $headers = $this->parseHeaders($buffer);
+                    $lines = explode("\r\n", $buffer);
+                    $requestLine = $lines[0];
+                    if (preg_match('/GET \/\?device_id=([^ ]+)/', $requestLine, $matches)) {
+                        $deviceId = urldecode($matches[1]);
+                        error_log("Servidor: Extraído device_id da query string: $deviceId");
+                    } else {
+                        error_log("Servidor: Nenhum device_id encontrado na query string");
+                    }
+
+                    $headers = $self::parseHeaders($buffer);
                     error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
-                    $response = $this->generateHandshakeResponse($headers);
+                    $response = $self::generateHandshakeResponse($headers);
                     error_log("Servidor: Resposta de handshake gerada:\n" . $response);
 
                     if ($response === null) {
@@ -51,11 +61,13 @@ class WebsocketServer
                     $conn->write($response);
                     error_log("Servidor: Resposta de handshake enviada.");
                     $handshakeDone = true;
-                    self::addClient($conn);
+
+                    $clientId = $deviceId ?? uniqid('temp_', true);
+                    self::addClient($conn, $clientId);
 
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
                     if (!empty($buffer)) {
-                        $this->websocketMessage->broadcastMessage($conn, self::getClients(), $buffer);
+                        $this->websocketMessage->broadcastMessage($conn, self::$clients, $buffer);
                     }
                 } else {
                     while (strlen($buffer) >= 2) {
@@ -78,13 +90,14 @@ class WebsocketServer
 
                         $frame = substr($buffer, 0, $frameLength);
                         $buffer = substr($buffer, $frameLength);
-                        $this->websocketMessage->broadcastMessage($conn, self::getClients(), $frame);
+                        $this->websocketMessage->broadcastMessage($conn, self::$clients, $frame);
                     }
                 }
             });
 
-            $conn->on('close', function () use ($conn) {
-                self::removeClient($conn);
+            $conn->on('close', function () use ($conn, &$deviceId) {
+                $clientId = $deviceId ?? array_search($conn, self::$clients, true);
+                self::removeClient($conn, $clientId);
                 error_log("Servidor: Conexão fechada.");
             });
 
@@ -100,21 +113,22 @@ class WebsocketServer
         Loop::get()->run();
     }
 
-
-    private static function addClient(ConnectionInterface $client): void
+    private static function addClient(ConnectionInterface $client, string $clientId): void
     {
-        self::$clients[$client->resourceId] = $client;
-        error_log("Servidor: Cliente conectado (ID: " . $client->resourceId . "). Total de clientes: " . count(self::$clients));
+        self::$clients[$clientId] = $client;
+        error_log("Servidor: Cliente conectado (ID: $clientId). Endereço remoto: " . $client->getRemoteAddress());
+        error_log("Servidor: Total de clientes: " . count(self::$clients));
+        error_log("Servidor: Lista de clientes: " . json_encode(array_keys(self::$clients)));
     }
 
-    private static function removeClient(ConnectionInterface $client): void
+    private static function removeClient(ConnectionInterface $client, ?string $clientId): void
     {
-        unset(self::$clients[$client->resourceId]);
-        error_log("Servidor: Cliente desconectado (ID: " . $client->resourceId . "). Total de clientes: " . count(self::$clients));
-    }
-
-    private static function getClients(): array
-    {
-        return self::$clients;
+        if ($clientId && isset(self::$clients[$clientId])) {
+            error_log("Servidor: Removendo cliente (ID: $clientId). Endereço remoto: " . $client->getRemoteAddress());
+            unset(self::$clients[$clientId]);
+            error_log("Servidor: Total de clientes após remoção: " . count(self::$clients));
+        } else {
+            error_log("Servidor: Cliente não encontrado na lista (Endereço: " . $client->getRemoteAddress() . ")");
+        }
     }
 }
