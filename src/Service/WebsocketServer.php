@@ -40,6 +40,8 @@ class WebsocketServer
 
                     $lines = explode("\r\n", $buffer);
                     $requestLine = $lines[0];
+                    error_log("Servidor: Linha de requisição completa: " . $requestLine); // Log da linha completa
+
                     if (preg_match('/GET \/\?device_id=([^ ]+)/', $requestLine, $matches)) {
                         $deviceId = urldecode($matches[1]);
                         error_log("Servidor: Extraído device_id da query string: $deviceId");
