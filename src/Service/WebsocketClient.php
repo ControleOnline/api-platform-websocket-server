@@ -29,29 +29,30 @@ class WebsocketClient
         $messageSent = false;
         $error = null;
 
-        error_log("Iniciando conexão com $host:$port");
+        error_log("Cliente: Iniciando conexão com $host:$port");
         $connector->connect("tcp://{$host}:{$port}")->then(
             function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $loop, $host, $port) {
-                error_log("Conexão TCP estabelecida com $host:$port");
+                error_log("Cliente: Conexão TCP estabelecida com $host:$port");
 
                 try {
                     $secWebSocketKey = base64_encode(random_bytes(16));
-                    error_log("Chave WebSocket gerada: $secWebSocketKey");
+                    error_log("Cliente: Chave WebSocket gerada: $secWebSocketKey");
 
                     $request = $this->generateHandshakeRequest($host, $port, $secWebSocketKey);
-                    error_log("Requisição de handshake gerada:\n$request");
+                    error_log("Cliente: Requisição de handshake gerada:\n$request");
+                    error_log("Cliente: Tamanho da requisição de handshake: " . strlen($request));
 
                     if (empty($request) || !is_string($request) || strpos($request, "GET /") === false) {
-                        $error = "Requisição de handshake inválida ou vazia";
+                        $error = "Cliente: Requisição de handshake inválida ou vazia";
                         error_log($error);
                         $conn->close();
                         return;
                     }
 
                     $conn->write($request);
-                    error_log("Requisição de handshake enviada com sucesso");
+                    error_log("Cliente: Requisição de handshake enviada com sucesso");
                 } catch (Exception $e) {
-                    $error = "Erro ao gerar ou enviar handshake: " . $e->getMessage();
+                    $error = "Cliente: Erro ao gerar ou enviar handshake: " . $e->getMessage();
                     error_log($error);
                     $conn->close();
                     return;
@@ -59,23 +60,25 @@ class WebsocketClient
 
                 $buffer = '';
                 $conn->on('data', function ($data) use ($conn, $payload, &$messageSent, &$error, $secWebSocketKey, $loop, &$buffer) {
+                    error_log("Cliente: Dados recebidos do servidor (hex): " . bin2hex($data));
                     $buffer .= $data;
-                    error_log("Dados recebidos do servidor:\n$data");
+                    error_log("Cliente: Buffer (hex): " . bin2hex($buffer));
 
                     if (strpos($buffer, "\r\n\r\n") === false) {
-                        error_log("Resposta incompleta, aguardando mais dados");
+                        error_log("Cliente: Resposta incompleta, aguardando mais dados");
                         return;
                     }
 
-                    error_log("Resposta completa do servidor:\n$buffer");
+                    error_log("Cliente: Resposta completa do servidor (hex):\n" . bin2hex($buffer));
                     try {
                         $headers = $this->parseHeaders($buffer);
+                        error_log("Cliente: Status Line e Cabeçalhos processados: " . json_encode($headers, JSON_PRETTY_PRINT));
+
                         $statusLine = explode("\r\n", $buffer)[0];
-                        error_log("Status Line: $statusLine");
-                        error_log("Cabeçalhos processados: " . json_encode($headers));
+                        error_log("Cliente: Status Line: $statusLine");
 
                         if (!preg_match('/HTTP\/1\.1 101/', $statusLine)) {
-                            $error = "Resposta HTTP inválida: $statusLine";
+                            $error = "Cliente: Resposta HTTP inválida: $statusLine";
                             error_log($error);
                             $conn->close();
                             return;
@@ -87,23 +90,23 @@ class WebsocketClient
                             !isset($headers['sec-websocket-accept']) ||
                             $headers['sec-websocket-accept'] !== $this->calculateWebSocketAccept($secWebSocketKey)
                         ) {
-                            $error = 'Handshake inválido';
-                            error_log("Erro no handshake. Cabeçalhos: " . json_encode($headers));
+                            $error = 'Cliente: Handshake inválido';
+                            error_log("Cliente: Erro no handshake. Cabeçalhos: " . json_encode($headers));
                             $conn->close();
                             return;
                         }
 
-                        error_log("Handshake bem-sucedido, enviando payload: $payload");
-                        $frame = chr(0x81) . chr(strlen($payload)) . $payload;
+                        error_log("Cliente: Handshake bem-sucedido, enviando payload: $payload");
+                        $frame = $this->encodeWebSocketFrame($payload);
                         $conn->write($frame);
                         $messageSent = true;
 
-                        $loop->addTimer(30, function () use ($conn) {
-                            error_log("Fechando conexão após envio");
+                        $loop->addTimer(1, function () use ($conn) {
+                            error_log("Cliente: Fechando conexão após envio");
                             $conn->close();
                         });
                     } catch (Exception $e) {
-                        $error = "Erro ao processar resposta: " . $e->getMessage();
+                        $error = "Cliente: Erro ao processar resposta: " . $e->getMessage();
                         error_log($error);
                         $conn->close();
                     }
@@ -111,41 +114,41 @@ class WebsocketClient
 
                 $conn->on('close', function () use (&$error, &$messageSent) {
                     if (!$messageSent && !$error) {
-                        $error = 'Conexão fechada antes de enviar a mensagem';
+                        $error = 'Cliente: Conexão fechada antes de enviar a mensagem';
                         error_log($error);
                     }
                 });
 
                 $conn->on('error', function (Exception $e) use (&$error) {
-                    $error = 'Erro na conexão: ' . $e->getMessage();
+                    $error = 'Cliente: Erro na conexão: ' . $e->getMessage();
                     error_log($error);
                 });
             },
             function (Exception $e) use (&$error) {
-                $error = 'Falha ao conectar: ' . $e->getMessage();
+                $error = 'Cliente: Falha ao conectar: ' . $e->getMessage();
                 error_log($error);
             }
         );
 
-        $loop->addTimer(10, function () use ($loop, &$error, &$messageSent) {
+        $loop->addTimer(30, function () use ($loop, &$error, &$messageSent) { // Aumentei o timeout para 30 segundos
             if (!$messageSent && !$error) {
-                $error = 'Timeout ao enviar mensagem';
+                $error = 'Cliente: Timeout ao enviar mensagem';
                 error_log($error);
             }
             $loop->stop();
         });
 
         try {
-            error_log("Iniciando loop de eventos");
+            error_log("Cliente: Iniciando loop de eventos");
             $loop->run();
-            error_log("Loop de eventos finalizado");
+            error_log("Cliente: Loop de eventos finalizado");
         } catch (Exception $e) {
-            $error = 'Erro no loop de eventos: ' . $e->getMessage();
+            $error = 'Cliente: Erro no loop de eventos: ' . $e->getMessage();
             error_log($error);
         }
 
         if (!$messageSent && $error) {
-            error_log('Falha ao enviar mensagem: ' . $error);
+            error_log('Cliente: Falha ao enviar mensagem: ' . $error);
         }
     }
 }
