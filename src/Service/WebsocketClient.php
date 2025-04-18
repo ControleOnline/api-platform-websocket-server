@@ -36,10 +36,9 @@ class WebsocketClient
 
                 try {
                     $secWebSocketKey = base64_encode(random_bytes(16));
-                    error_log("Cliente: Chave WebSocket gerada: $secWebSocketKey");
-
+                    error_log("Cliente: **ANTES** de generateHandshakeRequest");
                     $request = $this->generateHandshakeRequest($host, $port, $secWebSocketKey);
-                    error_log("Cliente: Requisição de handshake gerada:\n$request");
+                    error_log("Cliente: **DEPOIS** de generateHandshakeRequest");
                     error_log("Cliente: Tamanho da requisição de handshake: " . strlen($request));
 
                     if (empty($request) || !is_string($request) || strpos($request, "GET /") === false) {
