@@ -2,6 +2,7 @@
 
 namespace ControleOnline\Controller;
 
+use ControleOnline\Service\DeviceService;
 use ControleOnline\Service\WebsocketClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -12,14 +13,17 @@ use Throwable;
 
 class WebSocketController extends AbstractController
 {
-    public function __construct(private EntityManagerInterface $manager, private WebsocketClient $websocketClient) {}
+    public function __construct(
+        private EntityManagerInterface $manager,
+        private WebsocketClient $websocketClient
+    ) {}
     #[Route('/websocket', name: "websocket", methods: ["POST"])]
     public function sendMessage(Request $request): JsonResponse
     {
         try {
 
             $data = json_decode($request->getContent(), true);
-            $this->websocketClient->sendMessage($data['type'], $data['message']);
+            $this->websocketClient->sendMessage($data);
 
             return new JsonResponse([
                 'response' => [

@@ -15,7 +15,7 @@ class WebsocketServer
     private static $clients = [];
 
     public function __construct(
-        private WebsocketMessage $websocketMessage
+        private WebsocketMessage $websocketMessage,
     ) {}
 
     public function init()
@@ -41,11 +41,11 @@ class WebsocketServer
                     $headers = $self::parseHeaders($buffer);
                     error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
 
-                    if (isset($headers['x-device-id'])) {
-                        $deviceId = trim($headers['x-device-id']);
-                        error_log("Servidor: Extraído device_id do cabeçalho X-Device-ID: $deviceId");
+                    if (isset($headers['x-device'])) {
+                        $deviceId = trim($headers['x-device']);
+                        error_log("Servidor: Extraído device_id do cabeçalho X-Device: $deviceId");
                     } else {
-                        error_log("Servidor: Nenhum device_id encontrado no cabeçalho X-Device-ID");
+                        error_log("Servidor: Nenhum device_id encontrado no cabeçalho X-Device");
                     }
 
                     $response = $self::generateHandshakeResponse($headers);
@@ -66,7 +66,11 @@ class WebsocketServer
 
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
                     if (!empty($buffer)) {
-                        $this->websocketMessage->broadcastMessage($conn, self::$clients, $buffer);
+                        $this->websocketMessage->sendMessage(
+                            $conn,
+                            self::$clients,
+                            $buffer
+                        );
                     }
                 } else {
                     while (strlen($buffer) >= 2) {
@@ -89,7 +93,7 @@ class WebsocketServer
 
                         $frame = substr($buffer, 0, $frameLength);
                         $buffer = substr($buffer, $frameLength);
-                        $this->websocketMessage->broadcastMessage($conn, self::$clients, $frame);
+                        $this->websocketMessage->sendMessage($conn, self::$clients, $frame);
                     }
                 }
             });

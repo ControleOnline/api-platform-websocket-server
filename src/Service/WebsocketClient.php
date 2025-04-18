@@ -2,6 +2,7 @@
 
 namespace ControleOnline\Service;
 
+use ControleOnline\Entity\Device;
 use ControleOnline\Utils\WebSocketUtils;
 use Exception;
 use React\EventLoop\Loop;
@@ -12,13 +13,13 @@ class WebsocketClient
 {
     use WebSocketUtils;
 
-    public static function sendMessage(string $type, string $message): void
+    public static function sendMessage($message): void
     {
-        $payload = json_encode(['type' => $type, 'message' => $message]);
-        self::sendMessageToAll($payload);
-    }
+        $payload = json_encode([$message]);
+            self::sendBroadcast($payload);
+      }
 
-    private static function sendMessageToAll(string $payload): void
+    private static function sendBroadcast(string $payload): void
     {
         $loop = Loop::get();
         $connector = new Connector($loop);
