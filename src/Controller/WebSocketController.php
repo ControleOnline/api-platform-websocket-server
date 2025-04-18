@@ -17,7 +17,9 @@ class WebSocketController extends AbstractController
     public function sendMessage(Request $request): JsonResponse
     {
         try {
-            $this->websocketClient->sendMessage($request->get('type'), $request->get('message'));
+
+            $data = json_decode($request->getContent(), true);
+            $this->websocketClient->sendMessage($data['type'], $data['message']);
 
             return new JsonResponse([
                 'response' => [
