@@ -98,7 +98,7 @@ class WebsocketClient
                         $conn->write($frame);
                         $messageSent = true;
 
-                        $loop->addTimer(1, function () use ($conn) {
+                        $loop->addTimer(30, function () use ($conn) {
                             error_log("Fechando conexão após envio");
                             $conn->close();
                         });
