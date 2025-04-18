@@ -3,7 +3,6 @@
 namespace ControleOnline\Controller;
 
 use ControleOnline\Service\WebsocketClient;
-use ControleOnline\Service\WordPressService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
