@@ -97,7 +97,7 @@ trait WebSocketUtils
         return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
-    public  function decodeWebSocketFrame(string $data): ?string
+    public function decodeWebSocketFrame(string $data): ?string
     {
         error_log('Decodificando frame WebSocket: ' . bin2hex($data));
         $unmaskedPayload = '';
