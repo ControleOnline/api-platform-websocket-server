@@ -38,15 +38,14 @@ class WebsocketClient
                     $secWebSocketKey = base64_encode(random_bytes(16));
                     error_log("Chave WebSocket gerada: $secWebSocketKey");
 
-                    $request = $this->generateHandshakeRequest($host, $port, $secWebSocketKey);
+                    // Usar requisição manual para garantir formato correto
+                    $request = "GET / HTTP/1.1\r\n" .
+                               "Host: $host:$port\r\n" .
+                               "Upgrade: websocket\r\n" .
+                               "Connection: Upgrade\r\n" .
+                               "Sec-WebSocket-Key: $secWebSocketKey\r\n" .
+                               "Sec-WebSocket-Version: 13\r\n\r\n";
                     error_log("Requisição de handshake gerada:\n$request");
-
-                    if (empty($request) || !is_string($request) || strpos($request, "GET /") === false) {
-                        $error = "Requisição de handshake inválida ou vazia";
-                        error_log($error);
-                        $conn->close();
-                        return;
-                    }
 
                     $conn->write($request);
                     error_log("Requisição de handshake enviada com sucesso");
