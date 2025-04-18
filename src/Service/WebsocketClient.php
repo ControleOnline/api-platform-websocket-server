@@ -36,9 +36,14 @@ class WebsocketClient
 
                 try {
                     $secWebSocketKey = base64_encode(random_bytes(16));
-                    error_log("Cliente: **ANTES** de generateHandshakeRequest");
-                    $request = $this->generateHandshakeRequest($host, $port, $secWebSocketKey);
-                    error_log("Cliente: **DEPOIS** de generateHandshakeRequest");
+                    error_log("Cliente: **ANTESS** de generateHandshakeRequest");
+                    $request = "GET / HTTP/1.1\r\n"
+                        . "Host: {$host}:{$port}\r\n"
+                        . "Upgrade: websocket\r\n"
+                        . "Connection: Upgrade\r\n"
+                        . "Sec-WebSocket-Key: {$secWebSocketKey}\r\n"
+                        . "Sec-WebSocket-Version: 13\r\n\r\n";
+                    error_log("Cliente: **DEPOISS** de generateHandshakeRequest");
                     error_log("Cliente: Tamanho da requisição de handshake: " . strlen($request));
 
                     if (empty($request) || !is_string($request) || strpos($request, "GET /") === false) {
