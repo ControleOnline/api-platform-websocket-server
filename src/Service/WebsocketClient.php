@@ -27,16 +27,17 @@ class WebsocketClient
         $port = 8080;
         $messageSent = false;
         $error = null;
+        $self = self::class;
 
         error_log("Cliente: Iniciando conexão com $host:$port");
         $connector->connect("tcp://{$host}:{$port}")->then(
-            function (ConnectionInterface $conn) use ($payload, &$messageSent, &$error, $loop, $host, $port) {
+            function (ConnectionInterface $conn) use ($self, $payload, &$messageSent, &$error, $loop, $host, $port) {
                 error_log("Cliente: Conexão TCP estabelecida com $host:$port");
 
                 try {
                     $secWebSocketKey = base64_encode(random_bytes(16));
                     error_log("Cliente: **ANTES** de generateHandshakeRequest");
-                    $request = __CLASS__::generateHandshakeRequest($host, $port, $secWebSocketKey);
+                    $request = $self::generateHandshakeRequest($host, $port, $secWebSocketKey);
                     error_log("Cliente: **DEPOIS** de generateHandshakeRequest");
                     error_log("Cliente: Tamanho da requisição de handshake: " . strlen($request));
 
@@ -57,7 +58,7 @@ class WebsocketClient
                 }
 
                 $buffer = '';
-                $conn->on('data', function ($data) use ($conn, $payload, &$messageSent, &$error, $secWebSocketKey, $loop, &$buffer) {
+                $conn->on('data', function ($data) use ($self, $conn, $payload, &$messageSent, &$error, $secWebSocketKey, $loop, &$buffer) {
                     error_log("Cliente: Dados recebidos do servidor (hex): " . bin2hex($data));
                     $buffer .= $data;
                     error_log("Cliente: Buffer (hex): " . bin2hex($buffer));
@@ -69,7 +70,7 @@ class WebsocketClient
 
                     error_log("Cliente: Resposta completa do servidor (hex):\n" . bin2hex($buffer));
                     try {
-                        $headers = __CLASS__::parseHeaders($buffer);
+                        $headers = $self::parseHeaders($buffer);
                         error_log("Cliente: Status Line e Cabeçalhos processados: " . json_encode($headers, JSON_PRETTY_PRINT));
 
                         $statusLine = explode("\r\n", $buffer)[0];
@@ -86,7 +87,7 @@ class WebsocketClient
                             !isset($headers['upgrade']) || strtolower($headers['upgrade']) !== 'websocket' ||
                             !isset($headers['connection']) || strtolower($headers['connection']) !== 'upgrade' ||
                             !isset($headers['sec-websocket-accept']) ||
-                            $headers['sec-websocket-accept'] !== __CLASS__::calculateWebSocketAccept($secWebSocketKey)
+                            $headers['sec-websocket-accept'] !== $self::calculateWebSocketAccept($secWebSocketKey)
                         ) {
                             $error = 'Cliente: Handshake inválido';
                             error_log("Cliente: Erro no handshake. Cabeçalhos: " . json_encode($headers));
@@ -95,7 +96,7 @@ class WebsocketClient
                         }
 
                         error_log("Cliente: Handshake bem-sucedido, enviando payload: $payload");
-                        $frame = __CLASS__::encodeWebSocketFrame($payload);
+                        $frame = $self::encodeWebSocketFrame($payload);
                         $conn->write($frame);
                         $messageSent = true;
 

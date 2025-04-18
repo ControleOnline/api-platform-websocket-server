@@ -4,7 +4,7 @@ namespace ControleOnline\Utils;
 
 trait WebSocketUtils
 {
-    private function parseHeaders(string $buffer): array
+    public static function parseHeaders(string $buffer): array
     {
         $headers = [];
         $headerLines = explode("\r\n", substr($buffer, 0, strpos($buffer, "\r\n\r\n")));
@@ -20,14 +20,14 @@ trait WebSocketUtils
     }
 
 
-    private function calculateWebSocketAccept(string $secWebSocketKey): string
+    public static  function calculateWebSocketAccept(string $secWebSocketKey): string
     {
         $magicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
         return base64_encode(sha1($secWebSocketKey . $magicString, true));
     }
 
 
-    public function generateHandshakeRequest(string $host, int $port, string $secWebSocketKey): string
+    public static function generateHandshakeRequest(string $host, int $port, string $secWebSocketKey): string
     {
         return "GET / HTTP/1.1\r\n"
             . "Host: {$host}:{$port}\r\n"
@@ -37,7 +37,7 @@ trait WebSocketUtils
             . "Sec-WebSocket-Version: 13\r\n\r\n";
     }
 
-    private function generateHandshakeResponse(array $headers): ?string
+    public static  function generateHandshakeResponse(array $headers): ?string
     {
         if (
             !isset($headers['upgrade']) || strtolower($headers['upgrade']) !== 'websocket' ||
@@ -58,7 +58,7 @@ trait WebSocketUtils
             "Sec-WebSocket-Accept: $hash\r\n\r\n";
     }
 
-    public function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
+    public static function encodeWebSocketFrame(string $payload, int $opcode = 0x1): string
     {
         $frameHead = [];
         $payloadLength = strlen($payload);
@@ -97,7 +97,7 @@ trait WebSocketUtils
         return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
-    public function decodeWebSocketFrame(string $data): ?string
+    public static function decodeWebSocketFrame(string $data): ?string
     {
         error_log('Decodificando frame WebSocket: ' . bin2hex($data));
         $unmaskedPayload = '';
