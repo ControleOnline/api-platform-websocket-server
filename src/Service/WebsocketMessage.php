@@ -38,6 +38,8 @@ class WebsocketMessage
 
     private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame)
     {
+        error_log('Quantidade de clientes: ' . count($clients));
+
         foreach ($clients as $client) {
             error_log('Dados: ' . json_encode($client));
             if ($client !== $sender) {
