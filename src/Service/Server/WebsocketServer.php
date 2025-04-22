@@ -36,18 +36,27 @@ class WebsocketServer
             $deviceId = null;
             $self = self::class;
 
+            error_log("Servidor: Nova conexão recebida de " . $conn->getRemoteAddress());
+
             $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
                 $buffer .= $data;
 
                 if (!$handshakeDone) {
                     if (strpos($buffer, "\r\n\r\n") === false) return;
                     $headers = $self::parseHeaders($buffer);
-                    if (isset($headers['x-device']))
+                    error_log("Servidor: Cabeçalhos recebidos: " . json_encode($headers));
+                    if (isset($headers['x-device'])) {
                         $deviceId = trim($headers['x-device']);
+                        error_log("Servidor: Device ID: $deviceId");
+                    } else {
+                        error_log("Servidor: Cabeçalho x-device ausente");
+                        $conn->close();
+                        return;
+                    }
 
                     $response = $self::generateHandshakeResponse($headers);
-
                     if ($response === null) {
+                        error_log("Servidor: Handshake falhou");
                         $conn->close();
                         return;
                     }
@@ -56,15 +65,12 @@ class WebsocketServer
                     $handshakeDone = true;
 
                     $clientId = $deviceId ?? uniqid('temp_', true);
+                    error_log("Servidor: Registrando cliente com ID: $clientId");
                     self::addClient($conn, $clientId);
 
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
                     if (!empty($buffer))
-                        $this->websocketMessage->sendMessage(
-                            $conn,
-                            self::$clients,
-                            $buffer
-                        );
+                        $this->websocketMessage->sendMessage($conn, self::$clients, $buffer);
                 } else {
                     while (strlen($buffer) >= 2) {
                         $masked = (ord($buffer[1]) >> 7) & 0x1;
@@ -93,11 +99,12 @@ class WebsocketServer
 
             $conn->on('close', function () use ($conn, &$deviceId) {
                 $clientId = $deviceId ?? array_search($conn, self::$clients, true);
+                error_log("Servidor: Conexão fechada, Client ID: " . ($clientId ?: 'Desconhecido'));
                 self::removeClient($conn, $clientId);
             });
 
             $conn->on('error', function (Exception $e) {
-                error_log("Servidor: Erro na conexão: " . $e->getMessage());
+                error_log("Servidor: Erro na conexão: " . $e->getMessage() . " | Stack: " . $e->getTraceAsString());
             });
         });
 
@@ -149,7 +156,7 @@ class WebsocketServer
         self::$clients[$clientId] = $client;
     }
 
-    private static function removeClient(ConnectionInterface $client, ?string $clientId): void
+    private static function removeClient(ConnectionInterface $client, string $clientId): void
     {
         if ($clientId && isset(self::$clients[$clientId])) {
             unset(self::$clients[$clientId]);
