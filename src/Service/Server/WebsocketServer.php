@@ -1,6 +1,6 @@
 <?php
 
-namespace ControleOnline\Service;
+namespace ControleOnline\Service\Server;
 
 use ControleOnline\Entity\Device;
 use ControleOnline\Message\Websocket\PushMessage;

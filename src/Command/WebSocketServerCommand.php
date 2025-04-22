@@ -4,7 +4,7 @@ namespace ControleOnline\Command;
 
 use ControleOnline\Service\DatabaseSwitchService;
 use ControleOnline\Service\DomainService;
-use ControleOnline\Service\WebsocketServer;
+use ControleOnline\Service\Server\WebsocketServer;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
