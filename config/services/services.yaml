@@ -26,3 +26,8 @@ services:
         autowire: false
         autoconfigure: false
         public: false
+    ControleOnline\Service\WebsocketServer:
+        arguments:
+            $websocketMessage: '@ControleOnline\Service\WebsocketMessage' 
+            $messageBus: '@messenger.default_bus'
+            $receiver: '@messenger.transport.Websocket'

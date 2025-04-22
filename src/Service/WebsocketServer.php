@@ -4,6 +4,7 @@ namespace ControleOnline\Service;
 
 use ControleOnline\Message\Websocket\PushMessage;
 use ControleOnline\Utils\WebSocketUtils;
+use ControleOnline\Service\WebsocketMessage;
 use Exception;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;

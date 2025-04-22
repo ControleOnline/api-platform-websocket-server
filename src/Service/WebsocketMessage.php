@@ -40,6 +40,7 @@ class WebsocketMessage
     {
         foreach ($clients as $client) {
             if ($client !== $sender) {
+                error_log(json_encode($client));
                 error_log("Servidor: Enviando mensagem para cliente ID: " . $client->resourceId);
                 $client->write($encodedFrame);
             }
