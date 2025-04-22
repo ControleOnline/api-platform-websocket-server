@@ -24,29 +24,39 @@ class WebsocketMessage
         error_log("Servidor: Mensagem decodificada (string): $decodedMessage");
 
         $messageData = json_decode($decodedMessage, true);
+        error_log("Servidor: messageData após json_decode: " . json_encode($messageData));
         $destination_devices = $clients;
 
-        if (is_array($messageData) && isset($messageData['destination'])) {
-            $device = $this->deviceService->discoveryDevice($messageData['destination']);
-            error_log("Servidor: Resultado de discoveryDevice para destino {$messageData['destination']}: " . ($device ? 'encontrado' : 'não encontrado'));
-            if ($device) {
-                $deviceId = $device->getDevice();
-                error_log("Servidor: ID do dispositivo retornado: {$deviceId}");
-                if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
-                    $destination_devices = [$clients[$deviceId]];
-                    error_log("Servidor: Dispositivo encontrado em clients: {$deviceId}");
+        if (is_array($messageData)) {
+            // A mensagem pode ser um array com um único elemento, então acessamos o primeiro item
+            $targetMessage = $messageData[0] ?? null;
+            if (is_array($targetMessage) && isset($targetMessage['destination'])) {
+                $destination = $targetMessage['destination'];
+                error_log("Servidor: Destino especificado: {$destination}");
+                $device = $this->deviceService->discoveryDevice($destination);
+                error_log("Servidor: Resultado de discoveryDevice para destino {$destination}: " . ($device ? 'encontrado' : 'não encontrado'));
+                if ($device) {
+                    $deviceId = $device->getDevice();
+                    error_log("Servidor: ID do dispositivo retornado: {$deviceId}");
+                    if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
+                        $destination_devices = [$clients[$deviceId]];
+                        error_log("Servidor: Dispositivo encontrado em clients: {$deviceId}");
+                    } else {
+                        error_log("Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface. Tipo: " . gettype($clients[$deviceId] ?? 'não existe'));
+                        return;
+                    }
                 } else {
-                    error_log("Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface. Tipo: " . gettype($clients[$deviceId] ?? 'não existe'));
+                    error_log("Servidor: Dispositivo não encontrado para destino: {$destination}");
                     return;
                 }
             } else {
-                error_log("Servidor: Dispositivo não encontrado para destino: " . $messageData['destination']);
-                return;
+                error_log("Servidor: Nenhum destino especificado ou messageData inválido");
             }
         } else {
-            error_log("Servidor: Enviando para todos os clientes. Total de clientes: " . count($clients));
+            error_log("Servidor: messageData não é um array: " . gettype($messageData));
         }
 
+        error_log("Servidor: Enviando para " . count($destination_devices) . " clientes");
         $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
         $this->sendMessages($sender, $destination_devices, $encodedFrame);
     }
