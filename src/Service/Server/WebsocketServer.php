@@ -3,6 +3,7 @@
 namespace ControleOnline\Service\Server;
 
 use ControleOnline\Entity\Device;
+use ControleOnline\Entity\Integration;
 use ControleOnline\Service\IntegrationService;
 use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Utils\WebSocketUtils;
@@ -117,20 +118,24 @@ class WebsocketServer
                 $integrations = $this->integrationService->getOpenMessages('Websocket');
 
                 foreach ($integrations as $integration)
-                    $this->sendToClient($integration->getDevice(), $integration->getBody());
+                    $this->sendToClient($integration);
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao consumir mensagem: " . $e->getMessage());
             }
         });
     }
 
-    private function sendToClient(Device $device, string $message): void
+    private function sendToClient(Integration $integration): void
     {
+        $device = $integration->getDevice();
+        $message = $integration->getBody();
+
         if (isset(self::$clients[$device->getDevice()])) {
             $client = self::$clients[$device->getDevice()];
             try {
                 $frame = self::encodeWebSocketFrame($message, 0x1);
                 $client->write($frame);
+                $integration->setDelivered($integration);
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao enviar mensagem para o dispositivo {$device->getDevice()}: " . $e->getMessage());
                 self::removeClient($client, $device->getDevice());
