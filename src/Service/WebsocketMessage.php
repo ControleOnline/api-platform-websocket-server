@@ -28,22 +28,41 @@ class WebsocketMessage
 
         if (is_array($messageData) && isset($messageData['destination'])) {
             $device = $this->deviceService->discoveryDevice($messageData['destination']);
-            if ($device)
-                $destination_devices = [$clients[$device->getDevice()]];
+            if ($device) {
+                $deviceId = $device->getDevice(); // Retorna uma string (ID do dispositivo)
+                if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
+                    $destination_devices = [$clients[$deviceId]]; // Usa o ConnectionInterface correspondente
+                } else {
+                    error_log("Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface");
+                    return;
+                }
+            } else {
+                error_log("Servidor: Dispositivo não encontrado para destino: " . $messageData['destination']);
+                return;
+            }
         }
 
         $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
-        $this->sendMessages($sender,  $destination_devices, $encodedFrame);
+        $this->sendMessages($sender, $destination_devices, $encodedFrame);
     }
 
     private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame)
     {
         error_log('Quantidade de clientes: ' . count($clients));
 
+        if (empty($clients)) {
+            error_log("Servidor: Nenhum cliente disponível para envio");
+            return;
+        }
+
         foreach ($clients as $client) {
-            error_log('Dados: ' . json_encode($client));
+            if (!$client instanceof ConnectionInterface) {
+                error_log("Servidor: Cliente inválido encontrado: " . json_encode($client));
+                continue;
+            }
+            error_log('Dados: ' . json_encode(['resourceId' => $client->resourceId ?? 'undefined']));
             if ($client !== $sender) {
-                error_log("Servidor: Enviando mensagem para cliente ID: " . $client->resourceId);
+                error_log("Servidor: Enviando mensagem para cliente ID: " . ($client->resourceId ?? 'undefined'));
                 $client->write($encodedFrame);
             }
         }
