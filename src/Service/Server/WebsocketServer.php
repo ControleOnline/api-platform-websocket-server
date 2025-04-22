@@ -3,7 +3,6 @@
 namespace ControleOnline\Service\Server;
 
 use ControleOnline\Entity\Device;
-use ControleOnline\Message\Websocket\PushMessage;
 use ControleOnline\Service\Asaas\IntegrationService;
 use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Utils\WebSocketUtils;

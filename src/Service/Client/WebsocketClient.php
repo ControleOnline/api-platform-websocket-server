@@ -4,7 +4,7 @@ namespace ControleOnline\Service\Client;
 
 use ControleOnline\Entity\Device;
 use ControleOnline\Entity\Integration;
-use ControleOnline\Service\Asaas\IntegrationService;
+use ControleOnline\Service\IntegrationService;
 use Doctrine\ORM\EntityManagerInterface;
 
 class WebsocketClient
