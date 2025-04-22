@@ -2,8 +2,10 @@
 
 namespace ControleOnline\Controller;
 
+use ControleOnline\Entity\Device;
 use ControleOnline\Service\DeviceService;
 use ControleOnline\Service\WebsocketClient;
+use ControleOnline\Service\WebsocketPusher;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -15,7 +17,9 @@ class WebSocketController extends AbstractController
 {
     public function __construct(
         private EntityManagerInterface $manager,
-        private WebsocketClient $websocketClient
+        private WebsocketPusher $websocketPusher,
+        private DeviceService $deviceService
+
     ) {}
     #[Route('/websocket', name: "websocket", methods: ["POST"])]
     public function sendMessage(Request $request): JsonResponse
@@ -23,7 +27,9 @@ class WebSocketController extends AbstractController
         try {
 
             $data = json_decode($request->getContent(), true);
-            $this->websocketClient->sendMessage($data);
+            $device = $this->deviceService->discoveryDevice($data['destination']);
+
+            $this->websocketPusher->push($device, json_encode($data));
 
             return new JsonResponse([
                 'response' => [

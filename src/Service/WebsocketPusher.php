@@ -14,7 +14,7 @@ class WebsocketPusher
 
     public function push(Device $device, string $message): void
     {
-        $deviceId = $device->getDevice(); 
+        $deviceId = $device->getDevice();
         $this->messageBus->dispatch(new PushMessage($deviceId, $message));
     }
 }
