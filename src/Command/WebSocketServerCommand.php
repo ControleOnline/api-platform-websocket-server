@@ -2,6 +2,8 @@
 
 namespace ControleOnline\Command;
 
+use ControleOnline\Service\DatabaseSwitchService;
+use ControleOnline\Service\DomainService;
 use ControleOnline\Service\WebsocketServer;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -11,8 +13,11 @@ class WebSocketServerCommand extends Command
 {
 
     public function __construct(
-        private WebsocketServer $websocketServer
+        private WebsocketServer $websocketServer,
+        private DatabaseSwitchService $databaseSwitchService,
+        private DomainService $domainService
     ) {
+        $databaseSwitchService->switchDatabaseByDomain('api.controleonline.com');
         parent::__construct();
     }
     protected function configure()
