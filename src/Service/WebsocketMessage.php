@@ -29,7 +29,7 @@ class WebsocketMessage
         if (is_array($messageData) && isset($messageData['destination'])) {
             $device = $this->deviceService->discoveryDevice($messageData['destination']);
             if ($device)
-                $destination_devices = [$device->getDevice()];
+                $destination_devices = [$clients[$device->getDevice()]];
         }
 
         $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
