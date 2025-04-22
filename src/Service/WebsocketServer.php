@@ -117,7 +117,7 @@ class WebsocketServer
                     $message = $envelope->getMessage();
                     if ($message instanceof PushMessage) {
                         $this->sendToClient($message->deviceId, $message->message);
-                        $this->receiver->ack($envelope);
+                        //$this->receiver->ack($envelope);
                     }
                 }
             } catch (Exception $e) {
