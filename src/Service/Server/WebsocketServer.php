@@ -138,6 +138,8 @@ class WebsocketServer
                 self::removeClient($client, $device->getDevice());
             }
         } else {
+            error_log("Servidor: Dispositivos conectados: " . json_encode(array_keys(self::$clients)));
+            error_log("Servidor: Dispositivos conectados: " . count(self::$clients));
             error_log("Servidor: Dispositivo {$device->getDevice()} não está conectado.");
         }
     }
