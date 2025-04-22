@@ -61,15 +61,16 @@ class WebsocketServer
                         return;
                     }
 
+                    // Verificar conexão duplicada antes de aceitar
+                    if (isset(self::$clients[$deviceId])) {
+                        error_log("Servidor: Conexão duplicada para $deviceId. Rejeitando nova conexão.");
+                        $conn->write("HTTP/1.1 409 Conflict\r\n\r\nDevice already connected");
+                        $conn->close();
+                        return;
+                    }
+
                     $conn->write($response);
                     $handshakeDone = true;
-
-                    // Verificar se já existe uma conexão para este deviceId
-                    if (isset(self::$clients[$deviceId])) {
-                        error_log("Servidor: Conexão duplicada para $deviceId. Fechando conexão antiga.");
-                        self::$clients[$deviceId]->close();
-                        self::removeClient(self::$clients[$deviceId], $deviceId);
-                    }
 
                     error_log("Servidor: Registrando cliente com ID: $deviceId");
                     self::addClient($conn, $deviceId);
@@ -105,7 +106,7 @@ class WebsocketServer
 
             $conn->on('close', function () use ($conn, &$deviceId) {
                 $clientId = $deviceId ?? array_search($conn, self::$clients, true);
-                error_log("Servidor: Conexão fechada, Client ID: " . ($clientId ?: 'Desconhecido') . ", Endereço: " . $conn->getRemoteAddress());
+                error_log("Servidor: Conexão fechada, Client ID: " . ($clientId ?: 'Desconhecido') . ", Endereço: " . $conn->getRemoteAddress() . ", Processo: " . getmypid());
                 self::removeClient($conn, $clientId);
             });
 
@@ -118,6 +119,19 @@ class WebsocketServer
             error_log("Servidor: Erro no socket principal: " . $e->getMessage());
         });
 
+        // Adicionar ping para detectar conexões inativas
+        $loop->addPeriodicTimer(30, function () {
+            foreach (self::$clients as $clientId => $client) {
+                try {
+                    $client->write(self::encodeWebSocketFrame('', 0x9)); // Ping frame
+                    error_log("Servidor: Enviando ping para $clientId");
+                } catch (Exception $e) {
+                    error_log("Servidor: Erro ao enviar ping para $clientId: " . $e->getMessage());
+                    self::removeClient($client, $clientId);
+                }
+            }
+        });
+
         $this->consumeMessages($loop);
         $loop->run();
     }
@@ -127,7 +141,7 @@ class WebsocketServer
         $loop->addPeriodicTimer(1, function () {
             try {
                 $integrations = $this->integrationService->getOpenMessages('Websocket');
-                error_log("Servidor: Mensagens recebidas: " . count($integrations));
+                error_log("Servidor: Mensagens recebidas: " . count($integrations) . ", Processo: " . getmypid());
                 foreach ($integrations as $integration) {
                     $this->sendToClient($integration);
                 }
@@ -142,7 +156,7 @@ class WebsocketServer
         $device = $integration->getDevice();
         $message = $integration->getBody();
         $deviceId = $device->getDevice();
-        error_log("Servidor: Tentando enviar para dispositivo: $deviceId");
+        error_log("Servidor: Tentando enviar para dispositivo: $deviceId no processo " . getmypid());
 
         if (isset(self::$clients[$deviceId])) {
             $client = self::$clients[$deviceId];
@@ -165,16 +179,16 @@ class WebsocketServer
     private static function addClient(ConnectionInterface $client, string $clientId): void
     {
         self::$clients[$clientId] = $client;
-        error_log("Servidor: Cliente adicionado: $clientId, Total: " . count(self::$clients) . ", Clientes: " . json_encode(array_keys(self::$clients)));
+        error_log("Servidor: Cliente adicionado: $clientId, Total: " . count(self::$clients) . ", Clientes: " . json_encode(array_keys(self::$clients)) . ", Processo: " . getmypid());
     }
 
     private static function removeClient(ConnectionInterface $client, ?string $clientId): void
     {
         if ($clientId && isset(self::$clients[$clientId])) {
             unset(self::$clients[$clientId]);
-            error_log("Servidor: Cliente removido: $clientId, Total: " . count(self::$clients) . ", Clientes: " . json_encode(array_keys(self::$clients)));
+            error_log("Servidor: Cliente removido: $clientId, Total: " . count(self::$clients) . ", Clientes: " . json_encode(array_keys(self::$clients)) . ", Processo: " . getmypid());
         } else {
-            error_log("Servidor: Cliente não encontrado na lista (Endereço: " . $client->getRemoteAddress() . ")");
+            error_log("Servidor: Cliente não encontrado na lista (Endereço: " . $client->getRemoteAddress() . "), Processo: " . getmypid());
         }
     }
 }
