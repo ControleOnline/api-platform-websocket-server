@@ -39,8 +39,8 @@ class WebsocketMessage
     private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame)
     {
         foreach ($clients as $client) {
+            error_log('Dados: ' . json_encode($client));
             if ($client !== $sender) {
-                error_log(json_encode($client));
                 error_log("Servidor: Enviando mensagem para cliente ID: " . $client->resourceId);
                 $client->write($encodedFrame);
             }
