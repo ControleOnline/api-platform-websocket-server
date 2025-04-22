@@ -2,6 +2,7 @@
 
 namespace ControleOnline\Service\Server;
 
+use ControleOnline\Service\DeviceService;
 use ControleOnline\Utils\WebSocketUtils;
 use React\Socket\ConnectionInterface;
 
