@@ -28,18 +28,23 @@ class WebsocketMessage
 
         if (is_array($messageData) && isset($messageData['destination'])) {
             $device = $this->deviceService->discoveryDevice($messageData['destination']);
+            error_log("Servidor: Resultado de discoveryDevice para destino {$messageData['destination']}: " . ($device ? 'encontrado' : 'não encontrado'));
             if ($device) {
-                $deviceId = $device->getDevice(); // Retorna uma string (ID do dispositivo)
+                $deviceId = $device->getDevice();
+                error_log("Servidor: ID do dispositivo retornado: {$deviceId}");
                 if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
-                    $destination_devices = [$clients[$deviceId]]; // Usa o ConnectionInterface correspondente
+                    $destination_devices = [$clients[$deviceId]];
+                    error_log("Servidor: Dispositivo encontrado em clients: {$deviceId}");
                 } else {
-                    error_log("Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface");
+                    error_log("Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface. Tipo: " . gettype($clients[$deviceId] ?? 'não existe'));
                     return;
                 }
             } else {
                 error_log("Servidor: Dispositivo não encontrado para destino: " . $messageData['destination']);
                 return;
             }
+        } else {
+            error_log("Servidor: Enviando para todos os clientes. Total de clientes: " . count($clients));
         }
 
         $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
