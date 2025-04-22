@@ -2,15 +2,16 @@
 
 namespace ControleOnline\Service;
 
+use ControleOnline\Entity\Device;
 use ControleOnline\Message\Websocket\PushMessage;
+use ControleOnline\Service\Asaas\IntegrationService;
+use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Utils\WebSocketUtils;
-use ControleOnline\Service\WebsocketMessage;
+use ControleOnline\Service\Server\WebsocketMessage;
 use Exception;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
 use React\Socket\SocketServer;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Transport\Receiver\ReceiverInterface;
 
 class WebsocketServer
 {
@@ -20,8 +21,8 @@ class WebsocketServer
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
-        private MessageBusInterface $messageBus,
-        private ReceiverInterface $receiver
+        private WebsocketClient $websocketClient,
+        private IntegrationService $integrationService
     ) {}
 
     public function init()
@@ -112,33 +113,31 @@ class WebsocketServer
     {
         $loop->addPeriodicTimer(1, function () {
             try {
-                $envelopes = $this->receiver->get();
-                foreach ($envelopes as $envelope) {
-                    $message = $envelope->getMessage();
-                    if ($message instanceof PushMessage) {
-                        $this->sendToClient($message->deviceId, $message->message);
-                        //$this->receiver->ack($envelope);
-                    }
-                }
+
+
+                $integrations = $this->integrationService->getOpenMessages('Websocket');
+
+                foreach ($integrations as $integration)
+                    $this->sendToClient($integration->getDevice(), $integration->getBody());
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao consumir mensagem: " . $e->getMessage());
             }
         });
     }
 
-    private function sendToClient(string $deviceId, string $message): void
+    private function sendToClient(Device $device, string $message): void
     {
-        if (isset(self::$clients[$deviceId])) {
-            $client = self::$clients[$deviceId];
+        if (isset(self::$clients[$device->getDevice()])) {
+            $client = self::$clients[$device->getDevice()];
             try {
                 $frame = self::encodeWebSocketFrame($message, 0x1);
                 $client->write($frame);
             } catch (Exception $e) {
-                error_log("Servidor: Erro ao enviar mensagem para o dispositivo {$deviceId}: " . $e->getMessage());
-                self::removeClient($client, $deviceId);
+                error_log("Servidor: Erro ao enviar mensagem para o dispositivo {$device->getDevice()}: " . $e->getMessage());
+                self::removeClient($client, $device->getDevice());
             }
         } else {
-            error_log("Servidor: Dispositivo {$deviceId} não está conectado.");
+            error_log("Servidor: Dispositivo {$device->getDevice()} não está conectado.");
         }
     }
 

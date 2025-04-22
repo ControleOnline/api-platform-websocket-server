@@ -1,6 +1,6 @@
 <?php
 
-namespace ControleOnline\Service;
+namespace ControleOnline\Service\Server;
 
 use ControleOnline\Utils\WebSocketUtils;
 use React\Socket\ConnectionInterface;
