@@ -2,11 +2,14 @@
 
 namespace ControleOnline\Service;
 
+use ControleOnline\Message\Websocket\PushMessage;
 use ControleOnline\Utils\WebSocketUtils;
 use Exception;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
 use React\Socket\SocketServer;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Transport\Receiver\ReceiverInterface;
 
 class WebsocketServer
 {
@@ -16,11 +19,14 @@ class WebsocketServer
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
+        private MessageBusInterface $messageBus,
+        private ReceiverInterface $receiver
     ) {}
 
     public function init()
     {
-        $socket = new SocketServer("0.0.0.0:8080", [], Loop::get());
+        $loop = Loop::get();
+        $socket = new SocketServer("0.0.0.0:8080", [], $loop);
 
         $socket->on('connection', function (ConnectionInterface $conn) {
             $handshakeDone = false;
@@ -30,48 +36,33 @@ class WebsocketServer
 
             $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
                 $buffer .= $data;
-                error_log("Servidor recebeu dados:\n" . $data);
 
                 if (!$handshakeDone) {
-                    if (strpos($buffer, "\r\n\r\n") === false) {
-                        error_log("Servidor: Headers da requisição incompletos.");
-                        return;
-                    }
-
+                    if (strpos($buffer, "\r\n\r\n") === false) return;
                     $headers = $self::parseHeaders($buffer);
-                    error_log("Servidor: Headers da requisição parsed:\n" . json_encode($headers, JSON_PRETTY_PRINT));
-
-                    if (isset($headers['x-device'])) {
+                    if (isset($headers['x-device']))
                         $deviceId = trim($headers['x-device']);
-                        error_log("Servidor: Extraído device_id do cabeçalho X-Device: $deviceId");
-                    } else {
-                        error_log("Servidor: Nenhum device_id encontrado no cabeçalho X-Device");
-                    }
 
                     $response = $self::generateHandshakeResponse($headers);
-                    error_log("Servidor: Resposta de handshake gerada:\n" . $response);
 
                     if ($response === null) {
-                        error_log("Servidor: Resposta de handshake é nula. Fechando a conexão.");
                         $conn->close();
                         return;
                     }
 
                     $conn->write($response);
-                    error_log("Servidor: Resposta de handshake enviada.");
                     $handshakeDone = true;
 
                     $clientId = $deviceId ?? uniqid('temp_', true);
                     self::addClient($conn, $clientId);
 
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
-                    if (!empty($buffer)) {
+                    if (!empty($buffer))
                         $this->websocketMessage->sendMessage(
                             $conn,
                             self::$clients,
                             $buffer
                         );
-                    }
                 } else {
                     while (strlen($buffer) >= 2) {
                         $masked = (ord($buffer[1]) >> 7) & 0x1;
@@ -101,7 +92,6 @@ class WebsocketServer
             $conn->on('close', function () use ($conn, &$deviceId) {
                 $clientId = $deviceId ?? array_search($conn, self::$clients, true);
                 self::removeClient($conn, $clientId);
-                error_log("Servidor: Conexão fechada.");
             });
 
             $conn->on('error', function (Exception $e) {
@@ -113,23 +103,53 @@ class WebsocketServer
             error_log("Servidor: Erro no socket principal: " . $e->getMessage());
         });
 
-        Loop::get()->run();
+        $this->consumeMessages($loop);
+        $loop->run();
+    }
+
+    private function consumeMessages($loop): void
+    {
+        $loop->addPeriodicTimer(1, function () {
+            try {
+                $envelopes = $this->receiver->get();
+                foreach ($envelopes as $envelope) {
+                    $message = $envelope->getMessage();
+                    if ($message instanceof PushMessage) {
+                        $this->sendToClient($message->deviceId, $message->message);
+                        $this->receiver->ack($envelope);
+                    }
+                }
+            } catch (Exception $e) {
+                error_log("Servidor: Erro ao consumir mensagem: " . $e->getMessage());
+            }
+        });
+    }
+
+    private function sendToClient(string $deviceId, string $message): void
+    {
+        if (isset(self::$clients[$deviceId])) {
+            $client = self::$clients[$deviceId];
+            try {
+                $frame = self::encodeWebSocketFrame($message, 0x1);
+                $client->write($frame);
+            } catch (Exception $e) {
+                error_log("Servidor: Erro ao enviar mensagem para o dispositivo {$deviceId}: " . $e->getMessage());
+                self::removeClient($client, $deviceId);
+            }
+        } else {
+            error_log("Servidor: Dispositivo {$deviceId} não está conectado.");
+        }
     }
 
     private static function addClient(ConnectionInterface $client, string $clientId): void
     {
         self::$clients[$clientId] = $client;
-        error_log("Servidor: Cliente conectado (ID: $clientId). Endereço remoto: " . $client->getRemoteAddress());
-        error_log("Servidor: Total de clientes: " . count(self::$clients));
-        error_log("Servidor: Lista de clientes: " . json_encode(array_keys(self::$clients)));
     }
 
     private static function removeClient(ConnectionInterface $client, ?string $clientId): void
     {
         if ($clientId && isset(self::$clients[$clientId])) {
-            error_log("Servidor: Removendo cliente (ID: $clientId). Endereço remoto: " . $client->getRemoteAddress());
             unset(self::$clients[$clientId]);
-            error_log("Servidor: Total de clientes após remoção: " . count(self::$clients));
         } else {
             error_log("Servidor: Cliente não encontrado na lista (Endereço: " . $client->getRemoteAddress() . ")");
         }
