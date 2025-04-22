@@ -113,10 +113,7 @@ class WebsocketServer
     {
         $loop->addPeriodicTimer(1, function () {
             try {
-
-
                 $integrations = $this->integrationService->getOpenMessages('Websocket');
-
                 foreach ($integrations as $integration)
                     $this->sendToClient($integration);
             } catch (Exception $e) {
@@ -135,7 +132,7 @@ class WebsocketServer
             try {
                 $frame = self::encodeWebSocketFrame($message, 0x1);
                 $client->write($frame);
-                $integration->setDelivered($integration);
+                $this->integrationService->setDelivered($integration);
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao enviar mensagem para o dispositivo {$device->getDevice()}: " . $e->getMessage());
                 self::removeClient($client, $device->getDevice());
