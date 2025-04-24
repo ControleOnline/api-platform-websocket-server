@@ -140,16 +140,23 @@ class WebsocketServer
     {
         $loop->addPeriodicTimer(1, function () {
             try {
-                $integrations = $this->integrationService->getOpenMessages('Websocket');
-                error_log("Servidor: Mensagens recebidas: " . count($integrations) . ", Processo: " . getmypid());
-                foreach ($integrations as $integration) {
-                    $this->sendToClient($integration);
+                if (empty(self::$clients)) {
+                    error_log("Servidor: Nenhum cliente conectado. Ignorando busca de mensagens.");
+                    return;
                 }
+
+                $devices = array_keys(self::$clients);
+                $integrations = $this->integrationService->getOpenMessages('Websocket', $devices);
+                error_log("Servidor: Mensagens recebidas: " . count($integrations) . ", Processo: " . getmypid());
+
+                foreach ($integrations as $integration)
+                    $this->sendToClient($integration);
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao consumir mensagem: " . $e->getMessage());
             }
         });
     }
+
 
     private function sendToClient(Integration $integration): void
     {
@@ -168,6 +175,7 @@ class WebsocketServer
             } catch (Exception $e) {
                 error_log("Servidor: Erro ao enviar mensagem para $deviceId: " . $e->getMessage());
                 self::removeClient($client, $deviceId);
+                $this->integrationService->setError($integration);
             }
         } else {
             error_log("Servidor: Dispositivos conectados: " . json_encode(array_keys(self::$clients)));
