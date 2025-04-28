@@ -146,7 +146,7 @@ class WebsocketServer
                 }
 
                 $devices = array_keys(self::$clients);
-                $integrations = $this->integrationService->getOpenMessages('Websocket', $devices);
+                $integrations = $this->integrationService->getOpen(['Websocket'], $devices);
                 error_log("Servidor: Mensagens recebidas: " . count($integrations) . ", Processo: " . getmypid());
 
                 foreach ($integrations as $integration)
