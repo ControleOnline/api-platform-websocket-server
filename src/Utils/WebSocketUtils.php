@@ -4,6 +4,8 @@ namespace ControleOnline\Utils;
 
 trait WebSocketUtils
 {
+    protected static $logger;
+
     public static function parseHeaders(string $buffer): array
     {
         $headers = [];
@@ -89,13 +91,13 @@ trait WebSocketUtils
 
         $maskedPayload = $payload;
 
-        error_log('Enviando frame WebSocket (não mascarado): ' . bin2hex(pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload));
+        self::$logger->error('Enviando frame WebSocket (não mascarado): ' . bin2hex(pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload));
         return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
     public static function decodeWebSocketFrame(string $data): ?string
     {
-        error_log('Decodificando frame WebSocket: ' . bin2hex($data));
+        self::$logger->error('Decodificando frame WebSocket: ' . bin2hex($data));
         $unmaskedPayload = '';
         $payloadOffset = 2;
         $masked = (ord($data[1]) >> 7) & 0x1;
@@ -119,8 +121,8 @@ trait WebSocketUtils
             $unmaskedPayload = substr($data, $payloadOffset, $payloadLength);
         }
 
-        error_log('Payload decodificado (hex): ' . bin2hex($unmaskedPayload));
-        error_log('Payload decodificado: ' . $unmaskedPayload);
+        self::$logger->error('Payload decodificado (hex): ' . bin2hex($unmaskedPayload));
+        self::$logger->error('Payload decodificado: ' . $unmaskedPayload);
         return $unmaskedPayload;
     }
 }
