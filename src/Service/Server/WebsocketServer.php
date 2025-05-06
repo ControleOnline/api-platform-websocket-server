@@ -28,11 +28,11 @@ class WebsocketServer
         self::$logger = $loggerService->getLogger('websocket');
     }
 
-    public function init()
+    public function init($bind = '0.0.0.0', $port = 8080)
     {
         self::$logger->info("Servidor: Iniciando servidor no processo " . getmypid());
         $loop = Loop::get();
-        $socket = new SocketServer("0.0.0.0:8080", [], $loop);
+        $socket = new SocketServer($bind . ':' . $port, [], $loop);
 
         $socket->on('connection', function (ConnectionInterface $conn) {
             $handshakeDone = false;
