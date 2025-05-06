@@ -28,7 +28,7 @@ class WebsocketServer
         self::$logger = $loggerService->getLogger('websocket');
     }
 
-    public function init($bind = '0.0.0.0', $port = 8080)
+    public function init(?string $bind = '0.0.0.0', ?string $port = '8080')
     {
         self::$logger->info("Servidor: Iniciando servidor no processo " . getmypid());
         $loop = Loop::get();

@@ -56,7 +56,7 @@ class WebSocketServerCommand extends DefaultCommand
         $bind = $this->input->getOption('bind');
 
         if ($this->lock->acquire())
-            $this->websocketServer->init($bind,$port);
+            $this->websocketServer->init($bind, $port);
 
 
         return Command::SUCCESS;
