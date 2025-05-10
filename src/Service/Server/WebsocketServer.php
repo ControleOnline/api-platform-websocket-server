@@ -165,17 +165,25 @@ class WebsocketServer
         $device = $integration->getDevice();
         $message = $integration->getBody();
         $deviceId = $device->getDevice();
-        self::$logger->info("Servidor: Tentando enviar para dispositivo: $deviceId no processo " . getmypid());
+        self::$logger->info("Servidor: Tentando enviar para dispositivo: $deviceId, Tamanho da mensagem: " . strlen($message) . " bytes, Processo: " . getmypid());
+        self::$logger->info("Servidor: Conteúdo da mensagem: " . $message);
 
         if (isset(self::$clients[$deviceId])) {
             $client = self::$clients[$deviceId];
             try {
                 $frame = self::encodeWebSocketFrame($message, 0x1);
+                self::$logger->info("Servidor: Frame gerado para $deviceId, Tamanho do frame: " . strlen($frame) . " bytes");
                 $client->write($frame);
-                self::$logger->info("Servidor: Frame enviado para $deviceId: " . bin2hex($frame));
-                $this->integrationService->setDelivered($integration);
+                self::$logger->info("Servidor: Frame enviado para $deviceId");
+                self::$logger->info("Servidor: Chamando setDelivered para integration ID: " . ($integration->getId() ?? 'N/A'));
+                try {
+                    $this->integrationService->setDelivered($integration);
+                    self::$logger->info("Servidor: Mensagem marcada como entregue para $deviceId");
+                } catch (Exception $e) {
+                    self::$logger->error("Servidor: Erro ao marcar mensagem como entregue para $deviceId: " . $e->getMessage() . ", Trace: " . $e->getTraceAsString());
+                }
             } catch (Exception $e) {
-                self::$logger->error("Servidor: Erro ao enviar mensagem para $deviceId: " . $e->getMessage());
+                self::$logger->error("Servidor: Erro ao enviar mensagem para $deviceId: " . $e->getMessage() . ", Trace: " . $e->getTraceAsString());
                 self::removeClient($client, $deviceId);
                 $this->integrationService->setError($integration);
             }
