@@ -52,12 +52,11 @@ class WebSocketServerCommand extends DefaultCommand
     }
     protected function runCommand(): int
     {
-        $port = $this->input->getOption('port');
-        $bind = $this->input->getOption('bind');
+        $port = $this->input->getOption('port') ?? '8080';
+        $bind = $this->input->getOption('bind') ?? '0.0.0.0';
 
         if ($this->lock->acquire())
             $this->websocketServer->init($bind, $port);
-
 
         return Command::SUCCESS;
     }
