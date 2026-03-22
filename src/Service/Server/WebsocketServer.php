@@ -49,6 +49,14 @@ class WebsocketServer
                     if (strpos($buffer, "\r\n\r\n") === false) return;
                     $headers = $self::parseHeaders($buffer);
                     self::$logger->info("Servidor: Cabeçalhos recebidos: " . json_encode($headers));
+
+                    if ((!isset($headers['x-device']) || empty(trim($headers['x-device']))) && preg_match('/^GET ([^\s]+) HTTP/', $buffer, $matches)) {
+                        parse_str(parse_url($matches[1], PHP_URL_QUERY) ?? '', $queryParams);
+                        if (!empty($queryParams['device'])) {
+                            $headers['x-device'] = $queryParams['device'];
+                        }
+                    }
+
                     if (!isset($headers['x-device']) || empty(trim($headers['x-device']))) {
                         self::$logger->error("Servidor: Cabeçalho x-device ausente ou inválido");
                         $conn->close();
