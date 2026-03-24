@@ -6,7 +6,7 @@ services:
     Symfony\Component\DependencyInjection\ContainerInterface: '@service_container'
     ControleOnline\:
         resource: '../../src/*'
-        exclude: '../src/{DependencyInjection,Entity,Resource,Migrations,Library,Tests,Kernel.php}'
+        exclude: '../../src/{DependencyInjection,Entity,Resource,Migrations,Library,Message,Tests,Kernel.php}'
     ControleOnline\Repository\:
         resource: '../../src/Repository'
         tags: ['doctrine.repository_service']
