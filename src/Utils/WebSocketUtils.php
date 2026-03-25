@@ -41,6 +41,7 @@ trait WebSocketUtils
 
     public static function generateHandshakeResponse(array $headers): ?string
     {
+        unset($headers['sec-websocket-extensions']);
         if (
             !isset($headers['upgrade']) || strtolower($headers['upgrade']) !== 'websocket' ||
             !isset($headers['connection']) || strtolower($headers['connection']) !== 'upgrade' ||
