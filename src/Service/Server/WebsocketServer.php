@@ -18,6 +18,7 @@ class WebsocketServer
     use WebSocketUtils;
 
     private static $clients = [];
+    private static $logger;
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
@@ -46,45 +47,47 @@ class WebsocketServer
                 $buffer .= $data;
 
                 if (!$handshakeDone) {
+                    // Aguarda o fim do cabeçalho HTTP (\r\n\r\n)
                     if (strpos($buffer, "\r\n\r\n") === false) return;
 
-                    self::$logger->info("RAW REQUEST:\n" . $buffer);
-
                     $headers = $self::parseHeaders($buffer);
-                    self::$logger->info("HEADERS: " . json_encode($headers));
 
-                    $deviceId = null;
+                    // --- CORREÇÃO: Tentar extrair o ID da URL se não estiver no Header ---
+                    if (!isset($headers['x-device']) || empty(trim($headers['x-device']))) {
+                        if (preg_match('/GET\s+([^\s?]+)(?:\?([^\s]*))?\s+HTTP/i', $buffer, $matches)) {
+                            $queryString = $matches[2] ?? '';
+                            parse_str($queryString, $queryParams);
 
-                    if (!empty($headers['x-device'])) {
-                        $deviceId = trim($headers['x-device']);
-                    }
+                            // Aceita tanto 'device' quanto 'x-device' na URL
+                            $foundId = $queryParams['device'] ?? $queryParams['x-device'] ?? null;
 
-                    if (!$deviceId && isset($headers['get'])) {
-                        parse_str(parse_url($headers['get'], PHP_URL_QUERY) ?? '', $queryParams);
-                        if (!empty($queryParams['device'])) {
-                            $deviceId = $queryParams['device'];
+                            if ($foundId) {
+                                $headers['x-device'] = $foundId;
+                                self::$logger->info("Servidor: Device ID extraído da URL: $foundId");
+                            }
                         }
                     }
 
-                    if (!$deviceId && preg_match('/device=([^&\s]+)/', $buffer, $m)) {
-                        $deviceId = urldecode($m[1]);
-                    }
-
-                    if (!$deviceId) {
-                        self::$logger->error("Device não informado");
+                    // Validação final do Device ID
+                    if (!isset($headers['x-device']) || empty(trim($headers['x-device']))) {
+                        self::$logger->error("Servidor: Cabeçalho ou parâmetro x-device ausente. Buffer: " . substr($buffer, 0, 100));
                         $conn->close();
                         return;
                     }
 
-                    if (isset(self::$clients[$deviceId])) {
-                        self::$clients[$deviceId]->close();
-                        unset(self::$clients[$deviceId]);
-                    }
-
+                    $deviceId = trim($headers['x-device']);
                     $response = $self::generateHandshakeResponse($headers);
 
                     if ($response === null) {
-                        self::$logger->error("Handshake falhou");
+                        self::$logger->error("Servidor: Handshake falhou para $deviceId");
+                        $conn->close();
+                        return;
+                    }
+
+                    // Verificar conexão duplicada
+                    if (isset(self::$clients[$deviceId])) {
+                        self::$logger->error("Servidor: Conexão duplicada para $deviceId. Rejeitando.");
+                        $conn->write("HTTP/1.1 409 Conflict\r\n\r\nDevice already connected");
                         $conn->close();
                         return;
                     }
@@ -92,45 +95,44 @@ class WebsocketServer
                     $conn->write($response);
                     $handshakeDone = true;
 
-                    self::$logger->info("Cliente registrado: $deviceId");
                     self::addClient($conn, $deviceId);
 
+                    // Processar dados remanescentes no buffer após o handshake
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
-
                     if (!empty($buffer)) {
                         $this->websocketMessage->sendMessage($conn, self::$clients, $buffer);
                     }
+                } else {
+                    // Processamento de frames WebSocket (Mensagens após handshake)
+                    while (strlen($buffer) >= 2) {
+                        $secondByte = ord($buffer[1]);
+                        $masked = ($secondByte >> 7) & 0x1;
+                        $payloadLength = $secondByte & 0x7F;
+                        $payloadOffset = 2;
 
-                    return;
-                }
+                        if ($payloadLength === 126) {
+                            if (strlen($buffer) < 4) break;
+                            $payloadOffset = 4;
+                            $payloadLength = unpack('n', substr($buffer, 2, 2))[1];
+                        } elseif ($payloadLength === 127) {
+                            if (strlen($buffer) < 10) break;
+                            $payloadOffset = 10;
+                            $payloadLength = unpack('J', substr($buffer, 2, 8))[1];
+                        }
 
-                while (strlen($buffer) >= 2) {
-                    $masked = (ord($buffer[1]) >> 7) & 0x1;
-                    $payloadLength = ord($buffer[1]) & 0x7F;
-                    $payloadOffset = 2;
+                        $frameLength = $payloadOffset + ($masked ? 4 : 0) + $payloadLength;
+                        if (strlen($buffer) < $frameLength) break;
 
-                    if ($payloadLength === 126) {
-                        $payloadOffset = 4;
-                        $payloadLength = unpack('n', substr($buffer, 2, 2))[1];
-                    } elseif ($payloadLength === 127) {
-                        $payloadOffset = 10;
-                        $payloadLength = unpack('J', substr($buffer, 2, 8))[1];
+                        $frame = substr($buffer, 0, $frameLength);
+                        $buffer = substr($buffer, $frameLength);
+                        $this->websocketMessage->sendMessage($conn, self::$clients, $frame);
                     }
-
-                    $frameLength = $payloadOffset + ($masked ? 4 : 0) + $payloadLength;
-                    if (strlen($buffer) < $frameLength) {
-                        break;
-                    }
-
-                    $frame = substr($buffer, 0, $frameLength);
-                    $buffer = substr($buffer, $frameLength);
-                    $this->websocketMessage->sendMessage($conn, self::$clients, $frame);
                 }
             });
 
             $conn->on('close', function () use ($conn, &$deviceId) {
                 $clientId = $deviceId ?? array_search($conn, self::$clients, true);
-                self::$logger->info("Servidor: Conexão fechada, Client ID: " . ($clientId ?: 'Desconhecido') . ", Endereço: " . $conn->getRemoteAddress() . ", Processo: " . getmypid());
+                self::$logger->info("Servidor: Conexão fechada: " . ($clientId ?: 'Desconhecido'));
                 self::removeClient($conn, $clientId);
             });
 
@@ -139,16 +141,12 @@ class WebsocketServer
             });
         });
 
-        $socket->on('error', function (Exception $e) {
-            self::$logger->error("Servidor: Erro no socket principal: " . $e->getMessage());
-        });
-
+        // Ping periódico para manter conexões vivas
         $loop->addPeriodicTimer(30, function () {
             foreach (self::$clients as $clientId => $client) {
                 try {
-                    $client->write(self::encodeWebSocketFrame('', 0x9));
+                    $client->write(self::encodeWebSocketFrame('', 0x9)); // Opcode 0x9 = Ping
                 } catch (Exception $e) {
-                    self::$logger->error("Erro ping $clientId: " . $e->getMessage());
                     self::removeClient($client, $clientId);
                 }
             }
@@ -162,9 +160,7 @@ class WebsocketServer
     {
         $loop->addPeriodicTimer(1, function () {
             try {
-                if (empty(self::$clients)) {
-                    return;
-                }
+                if (empty(self::$clients)) return;
 
                 $devices = array_keys(self::$clients);
                 $integrations = $this->integrationService->getWebsocketOpen($devices);
@@ -173,25 +169,25 @@ class WebsocketServer
                     $this->sendToClient($integration);
                 }
             } catch (Exception $e) {
-                self::$logger->error("Erro ao consumir mensagem: " . $e->getMessage());
+                self::$logger->error("Servidor: Erro ao consumir fila: " . $e->getMessage());
             }
         });
     }
 
     private function sendToClient(Integration $integration): void
     {
-        $device = $integration->getDevice();
-        $message = $integration->getBody();
-        $deviceId = $device->getDevice();
+        $deviceId = $integration->getDevice()->getDevice();
+        $message  = $integration->getBody();
 
         if (isset(self::$clients[$deviceId])) {
             $client = self::$clients[$deviceId];
             try {
-                $frame = self::encodeWebSocketFrame($message, 0x1);
+                $frame = self::encodeWebSocketFrame($message, 0x1); // Opcode 0x1 = Text
                 $client->write($frame);
                 $this->integrationService->setDelivered($integration);
+                self::$logger->info("Servidor: Mensagem enviada e confirmada para $deviceId");
             } catch (Exception $e) {
-                self::$logger->error("Erro ao enviar mensagem: " . $e->getMessage());
+                self::$logger->error("Servidor: Falha ao enviar para $deviceId: " . $e->getMessage());
                 self::removeClient($client, $deviceId);
                 $this->integrationService->setError($integration);
             }
@@ -201,31 +197,15 @@ class WebsocketServer
     private static function addClient(ConnectionInterface $client, string $clientId): void
     {
         self::$clients[$clientId] = $client;
+        self::$logger->info("Servidor: Cliente conectado: $clientId. Total: " . count(self::$clients));
     }
 
     private static function removeClient(ConnectionInterface $client, ?string $clientId): void
     {
         if ($clientId && isset(self::$clients[$clientId])) {
             unset(self::$clients[$clientId]);
+            self::$logger->info("Servidor: Cliente removido: $clientId");
         }
-    }
-
-    private static function parseHeaders(string $buffer): array
-    {
-        $headers = [];
-        $lines = explode("\r\n", $buffer);
-
-        foreach ($lines as $index => $line) {
-            if ($index === 0 && preg_match('/GET (.+) HTTP/', $line, $m)) {
-                $headers['get'] = $m[1];
-            }
-
-            if (strpos($line, ':') !== false) {
-                [$key, $value] = explode(':', $line, 2);
-                $headers[strtolower(trim($key))] = trim($value);
-            }
-        }
-
-        return $headers;
+        $client->end();
     }
 }
