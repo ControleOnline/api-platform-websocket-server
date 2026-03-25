@@ -7,7 +7,6 @@ use ControleOnline\Service\IntegrationService;
 use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Service\LoggerService;
 use ControleOnline\Utils\WebSocketUtils;
-use ControleOnline\Service\Server\WebsocketMessage;
 use Exception;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
@@ -18,8 +17,8 @@ class WebsocketServer
     use WebSocketUtils;
 
     private static $clients = [];
-    private static $pendingConnections = []; // Conexões sem ID ainda
-    private static $logger;
+    private static $pendingConnections = [];
+    private static $loggerInstance = null;
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
@@ -27,12 +26,21 @@ class WebsocketServer
         private IntegrationService $integrationService,
         private LoggerService $loggerService
     ) {
-        self::$logger = $loggerService->getLogger('websocket');
+        // Inicialização do logger de forma segura
+        self::$loggerInstance = $this->loggerService->getLogger('websocket');
+    }
+
+    private static function log($level, $message)
+    {
+        if (self::$loggerInstance) {
+            self::$loggerInstance->$level($message);
+        }
     }
 
     public function init(string $bind, string $port)
     {
-        self::$logger->info("Servidor: Iniciando servidor no processo " . getmypid());
+        self::log('info', "Servidor: Iniciando servidor no processo " . getmypid());
+
         $loop = Loop::get();
         $socket = new SocketServer($bind . ':' . $port, [], $loop);
 
@@ -40,18 +48,19 @@ class WebsocketServer
             $handshakeDone = false;
             $buffer = '';
             $deviceId = null;
-            $self = self::class;
+            $connHash = spl_object_hash($conn);
 
-            self::$logger->info("Servidor: Nova conexão anônima de " . $conn->getRemoteAddress());
+            self::log('info', "Servidor: Nova conexão recebida (anônima) de " . $conn->getRemoteAddress());
 
-            $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $self) {
+            $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, &$deviceId, $connHash) {
                 $buffer .= $data;
 
                 if (!$handshakeDone) {
                     if (strpos($buffer, "\r\n\r\n") === false) return;
 
-                    $headers = $self::parseHeaders($buffer);
-                    $response = $self::generateHandshakeResponse($headers);
+                    // Handshake simples sem exigir headers de device
+                    $headers = $this->parseHeaders($buffer);
+                    $response = $this->generateHandshakeResponse($headers);
 
                     if ($response === null) {
                         $conn->close();
@@ -60,15 +69,15 @@ class WebsocketServer
 
                     $conn->write($response);
                     $handshakeDone = true;
-                    
-                    // Adiciona a uma lista temporária
-                    $connHash = spl_object_hash($conn);
+
+                    // Armazena como pendente até que se identifique
                     self::$pendingConnections[$connHash] = $conn;
+                    self::log('info', "Servidor: Handshake concluído. Aguardando identificação...");
 
                     $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
                 }
 
-                // Processamento de Frames
+                // Processamento de Frames WebSocket
                 while (strlen($buffer) >= 2) {
                     $secondByte = ord($buffer[1]);
                     $masked = ($secondByte >> 7) & 0x1;
@@ -85,73 +94,85 @@ class WebsocketServer
                         $payloadLength = unpack('J', substr($buffer, 2, 8))[1];
                     }
 
-                    $frameLength = $payloadOffset + ($masked ? 4 : 0) + $payloadLength;
-                    if (strlen($buffer) < $frameLength) break;
+                    $totalLength = $payloadOffset + ($masked ? 4 : 0) + $payloadLength;
+                    if (strlen($buffer) < $totalLength) break;
 
-                    $frame = substr($buffer, 0, $frameLength);
-                    $buffer = substr($buffer, $frameLength);
+                    $frame = substr($buffer, 0, $totalLength);
+                    $buffer = substr($buffer, $totalLength);
 
-                    // --- LÓGICA DE IDENTIFICAÇÃO ---
-                    $decodedMessage = $self::decodeWebSocketFrame($frame);
-                    
+                    // Decodifica a mensagem recebida do cliente
+                    $decoded = $this->decodeWebSocketFrame($frame);
+
+                    // Se o cliente ainda não tem ID, procura o comando de identificação
                     if ($deviceId === null) {
-                        $data = json_decode($decodedMessage, true);
-                        // Espera um comando: {"command": "identify", "device": "123"}
-                        if (isset($data['command']) && $data['command'] == 'identify' && isset($data['device'])) {
+                        $data = json_decode($decoded, true);
+                        if (isset($data['command']) && $data['command'] === 'identify' && isset($data['device'])) {
                             $deviceId = trim($data['device']);
-                            
-                            // Remove de pendentes e adiciona aos clientes oficiais
-                            unset(self::$pendingConnections[spl_object_hash($conn)]);
-                            self::addClient($conn, $deviceId);
-                            
-                            $conn->write($self::encodeWebSocketFrame(json_encode(['status' => 'identified', 'device' => $deviceId])));
+
+                            // Remove de pendentes e adiciona aos oficiais
+                            unset(self::$pendingConnections[$connHash]);
+                            self::$clients[$deviceId] = $conn;
+
+                            self::log('info', "Servidor: Dispositivo identificado como [$deviceId]");
+
+                            // Responde confirmação ao cliente
+                            $conn->write($this->encodeWebSocketFrame(json_encode([
+                                'status' => 'identified',
+                                'device' => $deviceId
+                            ])));
                         }
                     } else {
-                        // Se já identificado, segue o fluxo normal
+                        // Se já identificado, trata a mensagem normalmente
                         $this->websocketMessage->sendMessage($conn, self::$clients, $frame);
                     }
                 }
             });
 
-            $conn->on('close', function () use ($conn, &$deviceId) {
-                if ($deviceId) {
-                    self::removeClient($conn, $deviceId);
-                } else {
-                    unset(self::$pendingConnections[spl_object_hash($conn)]);
+            $conn->on('close', function () use ($conn, &$deviceId, $connHash) {
+                if ($deviceId && isset(self::$clients[$deviceId])) {
+                    unset(self::$clients[$deviceId]);
+                    self::log('info', "Servidor: Cliente $deviceId desconectado.");
                 }
+                unset(self::$pendingConnections[$connHash]);
+            });
+
+            $conn->on('error', function (Exception $e) {
+                self::log('error', "Servidor: Erro na conexão: " . $e->getMessage());
             });
         });
 
-        // Ping para todos (oficiais e pendentes)
+        // Loop de mensagens do banco de dados
+        $this->consumeMessages($loop);
+
+        // Ping periódico para manter sockets abertos
         $loop->addPeriodicTimer(30, function () {
             $all = array_merge(self::$clients, self::$pendingConnections);
-            foreach ($all as $id => $client) {
+            foreach ($all as $client) {
                 try {
-                    $client->write(self::encodeWebSocketFrame('', 0x9));
+                    $client->write($this->encodeWebSocketFrame('', 0x9));
                 } catch (Exception $e) {
-                    $client->end();
+                    $client->close();
                 }
             }
         });
 
-        $this->consumeMessages($loop);
         $loop->run();
     }
 
-    // ... (restante dos métodos consumeMessages, sendToClient, addClient, removeClient permanecem similares)
-    
     private function consumeMessages($loop): void
     {
         $loop->addPeriodicTimer(1, function () {
-            if (empty(self::$clients)) return;
             try {
+                if (empty(self::$clients)) return;
+
                 $devices = array_keys(self::$clients);
                 $integrations = $this->integrationService->getWebsocketOpen($devices);
+
                 foreach ($integrations as $integration) {
                     $this->sendToClient($integration);
                 }
             } catch (Exception $e) {
-                self::$logger->error("Erro no consumo: " . $e->getMessage());
+                self::log('error', "Servidor: Erro ao consumir fila: " . $e->getMessage());
             }
         });
     }
@@ -159,24 +180,20 @@ class WebsocketServer
     private function sendToClient(Integration $integration): void
     {
         $deviceId = $integration->getDevice()->getDevice();
+        $message  = $integration->getBody();
+
         if (isset(self::$clients[$deviceId])) {
+            $client = self::$clients[$deviceId];
             try {
-                $frame = self::encodeWebSocketFrame($integration->getBody(), 0x1);
-                self::$clients[$deviceId]->write($frame);
+                $frame = $this->encodeWebSocketFrame($message, 0x1);
+                $client->write($frame);
                 $this->integrationService->setDelivered($integration);
+                self::log('info', "Servidor: Mensagem entregue para $deviceId");
             } catch (Exception $e) {
-                self::removeClient(self::$clients[$deviceId], $deviceId);
+                unset(self::$clients[$deviceId]);
+                $client->close();
+                $this->integrationService->setError($integration);
             }
         }
-    }
-
-    private static function addClient($client, $id) {
-        self::$clients[$id] = $client;
-        self::$logger->info("Dispositivo identificado: $id");
-    }
-
-    private static function removeClient($client, $id) {
-        unset(self::$clients[$id]);
-        $client->end();
     }
 }
