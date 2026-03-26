@@ -2,118 +2,174 @@
 
 namespace ControleOnline\Service\Server;
 
-use ControleOnline\Service\DeviceService;
+use ControleOnline\Entity\Integration;
+use ControleOnline\Service\IntegrationService;
+use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Service\LoggerService;
 use ControleOnline\Utils\WebSocketUtils;
+use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
+use React\Socket\SocketServer;
 
-class WebsocketMessage
+class WebsocketServer
 {
     use WebSocketUtils;
 
+    private static array $clients = [];
+    private static array $pending = [];
+
     public function __construct(
-        private DeviceService $deviceService,
-        private LoggerService $loggerService,
+        private WebsocketMessage $websocketMessage,
+        private WebsocketClient $websocketClient,
+        private IntegrationService $integrationService,
+        private LoggerService $loggerService
     ) {
         self::$logger = $loggerService->getLogger('websocket');
     }
 
-    /**
-     * Envia uma mensagem recebida para os clientes destino
-     */
-    public function sendMessage(ConnectionInterface $sender, array $clients, string $frame): void
+    public function init(string $bind, string $port): void
     {
-        self::$logger->error("Servidor: Recebido frame para broadcast (hex): " . bin2hex($frame));
+        self::$logger->info("Servidor WebSocket iniciado no processo " . getmypid() . " em {$bind}:{$port}");
+        $loop = Loop::get();
+        $socket = new SocketServer($bind . ':' . $port, [], $loop);
 
-        $decodedMessage = $this->decodeWebSocketFrame($frame);
-        if (!is_string($decodedMessage)) {
-            self::$logger->error("Servidor: Frame decodificado não é string. Ignorando.");
-            return;
-        }
+        $socket->on('connection', function (ConnectionInterface $conn) {
+            $handshakeDone = false;
+            $buffer = '';
+            $connId = spl_object_id($conn);
 
-        self::$logger->error("Servidor: Mensagem decodificada (string): $decodedMessage");
+            self::$logger->info("Nova conexão de " . $conn->getRemoteAddress() . " (connId: {$connId})");
 
-        $messageData = json_decode($decodedMessage, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            self::$logger->error(
-                "Servidor: JSON inválido: " . json_last_error_msg() .
-                " | Payload (hex): " . bin2hex($decodedMessage)
-            );
-            return;
-        }
+            $conn->on('data', function ($data) use ($conn, &$handshakeDone, &$buffer, $connId) {
+                $buffer .= $data;
 
-        self::$logger->error("Servidor: messageData após json_decode: " . json_encode($messageData));
+                if (!$handshakeDone) {
+                    if (strpos($buffer, "\r\n\r\n") === false) return;
 
-        $destination_devices = $clients;
-
-        if (is_array($messageData)) {
-            // A mensagem pode ser um array com um único elemento
-            $targetMessage = $messageData[0] ?? $messageData;
-
-            if (is_array($targetMessage) && isset($targetMessage['destination'])) {
-                $destination = $targetMessage['destination'];
-                self::$logger->error("Servidor: Destino especificado: {$destination}");
-
-                $device = $this->deviceService->discoveryDevice($destination);
-                self::$logger->error("Servidor: Resultado de discoveryDevice para destino {$destination}: " . ($device ? 'encontrado' : 'não encontrado'));
-
-                if ($device) {
-                    $deviceId = $device->getDevice();
-                    self::$logger->error("Servidor: ID do dispositivo retornado: {$deviceId}");
-
-                    if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
-                        $destination_devices = [$clients[$deviceId]];
-                        self::$logger->error("Servidor: Dispositivo encontrado em clients: {$deviceId}");
-                    } else {
-                        self::$logger->error(
-                            "Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface. " .
-                            "Tipo: " . gettype($clients[$deviceId] ?? 'não existe')
-                        );
+                    $headers = self::parseHeaders($buffer);
+                    $response = self::generateHandshakeResponse($headers);
+                    if (!$response) {
+                        self::$logger->error("Handshake falhou para connId {$connId}");
+                        $conn->close();
                         return;
                     }
-                } else {
-                    self::$logger->error("Servidor: Dispositivo não encontrado para destino: {$destination}");
-                    return;
-                }
-            } else {
-                self::$logger->error("Servidor: Nenhum destino especificado ou messageData inválido");
-            }
-        } else {
-            self::$logger->error("Servidor: messageData não é um array: " . gettype($messageData));
-        }
 
-        self::$logger->error("Servidor: Enviando para " . count($destination_devices) . " clientes");
-        $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
-        $this->sendMessages($sender, $destination_devices, $encodedFrame);
+                    $conn->write($response);
+                    $handshakeDone = true;
+                    self::$pending[$connId] = $conn;
+                    $pos = strpos($buffer, "\r\n\r\n") + 4;
+                    $remaining = substr($buffer, $pos);
+                    $buffer = '';
+                    if ($remaining) $this->processData($conn, $remaining);
+                } else {
+                    $this->processData($conn, $buffer);
+                    $buffer = '';
+                }
+            });
+
+            $conn->on('close', fn() => $this->cleanupConnection($conn));
+            $conn->on('error', fn($e) => $this->cleanupConnection($conn));
+        });
+
+        // Ping para manter conexões vivas
+        $loop->addPeriodicTimer(20, function () {
+            foreach (self::$clients as $deviceId => $client) {
+                try {
+                    $client->write(self::encodeWebSocketFrame('', 0x9));
+                } catch (\Exception $e) {
+                    $this->removeClient($client, $deviceId);
+                }
+            }
+        });
+
+        $this->consumeMessages($loop);
+        $loop->run();
     }
 
-    /**
-     * Envia o frame codificado para os clientes
-     */
-    private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame)
+    private function processData(ConnectionInterface $conn, string $data): void
     {
-        self::$logger->error('Quantidade de clientes: ' . count($clients));
+        $connId = spl_object_id($conn);
 
-        if (empty($clients)) {
-            self::$logger->error("Servidor: Nenhum cliente disponível para envio");
+        if (isset(self::$pending[$connId])) {
+            $decoded = self::decodeWebSocketFrame($data);
+            if (!$decoded || $decoded['opcode'] !== 0x1) {
+                $conn->close();
+                return;
+            }
+
+            $payload = json_decode($decoded['payload'], true);
+            if (!isset($payload['command']) || $payload['command'] !== 'identify') {
+                $conn->close();
+                return;
+            }
+
+            $deviceId = trim($payload['device'] ?? '');
+            if (!$deviceId || isset(self::$clients[$deviceId])) {
+                $conn->write(self::encodeWebSocketFrame(json_encode([
+                    'status' => 'error',
+                    'message' => $deviceId ? 'Device already connected' : 'Device ID vazio'
+                ]), 0x1));
+                $conn->close();
+                return;
+            }
+
+            self::$clients[$deviceId] = $conn;
+            unset(self::$pending[$connId]);
+
+            $conn->write(self::encodeWebSocketFrame(json_encode([
+                'status' => 'identified',
+                'device' => $deviceId
+            ]), 0x1));
             return;
         }
 
-        foreach ($clients as $client) {
-            if (!$client instanceof ConnectionInterface) {
-                self::$logger->error("Servidor: Cliente inválido encontrado: " . json_encode($client));
-                continue;
+        // Cliente já identificado
+        $this->websocketMessage->sendMessage($conn, self::$clients, $data);
+    }
+
+    private function cleanupConnection(ConnectionInterface $conn): void
+    {
+        $connId = spl_object_id($conn);
+        unset(self::$pending[$connId]);
+
+        $deviceId = array_search($conn, self::$clients, true);
+        if ($deviceId !== false) unset(self::$clients[$deviceId]);
+    }
+
+    private function removeClient(ConnectionInterface $client, ?string $deviceId): void
+    {
+        if ($deviceId && isset(self::$clients[$deviceId])) {
+            unset(self::$clients[$deviceId]);
+        }
+    }
+
+    private function consumeMessages($loop): void
+    {
+        $loop->addPeriodicTimer(1, function () {
+            if (!self::$clients) return;
+            $devices = array_keys(self::$clients);
+            $integrations = $this->integrationService->getWebsocketOpen($devices);
+            foreach ($integrations as $integration) {
+                $this->sendToClient($integration);
             }
+        });
+    }
 
-            self::$logger->error('Dados: ' . json_encode(['resourceId' => $client->resourceId ?? 'undefined']));
+    private function sendToClient(Integration $integration): void
+    {
+        $deviceId = $integration->getDevice()->getDevice();
+        $message = $integration->getBody();
 
-            if ($client !== $sender) {
-                self::$logger->error("Servidor: Enviando mensagem para cliente ID: " . ($client->resourceId ?? 'undefined'));
-                try {
-                    $client->write($encodedFrame);
-                } catch (\Exception $e) {
-                    self::$logger->error("Servidor: Falha ao enviar mensagem para cliente: " . $e->getMessage());
-                }
+        if (isset(self::$clients[$deviceId])) {
+            $client = self::$clients[$deviceId];
+            try {
+                $frame = self::encodeWebSocketFrame($message, 0x1);
+                $client->write($frame);
+                $this->integrationService->setDelivered($integration);
+            } catch (\Exception $e) {
+                self::$logger->error("Erro ao enviar mensagem para {$deviceId}");
+                $this->removeClient($client, $deviceId);
+                $this->integrationService->setError($integration);
             }
         }
     }
