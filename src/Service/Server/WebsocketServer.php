@@ -17,8 +17,8 @@ class WebsocketServer
 {
     use WebSocketUtils;
 
-    private static array $clients = [];   // deviceId => ConnectionInterface
-    private static array $pending = [];   // connId => ConnectionInterface
+    private static array $clients = [];
+    private static array $pending = [];
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
@@ -47,16 +47,14 @@ class WebsocketServer
                 $buffer .= $data;
 
                 if (!$handshakeDone) {
-                    if (strpos($buffer, "\r\n\r\n") === false) {
-                        return;
-                    }
+                    if (strpos($buffer, "\r\n\r\n") === false) return;
 
                     $headers = self::parseHeaders($buffer);
-                    self::$logger->info("Handshake recebido. Headers: " . json_encode($headers));
+                    self::$logger->info("Handshake recebido para connId {$connId}");
 
                     $response = self::generateHandshakeResponse($headers);
                     if ($response === null) {
-                        self::$logger->error("Handshake falhou para connId: {$connId}");
+                        self::$logger->error("Handshake falhou para connId {$connId}");
                         $conn->close();
                         return;
                     }
@@ -69,10 +67,9 @@ class WebsocketServer
                     $buffer = '';
 
                     self::$pending[$connId] = $conn;
-                    self::$logger->info("Handshake OK. Aguardando 'identify' (connId: {$connId})");
+                    self::$logger->info("Handshake OK - Aguardando identify (connId: {$connId})");
 
                     if (strlen($remaining) > 0) {
-                        self::$logger->info("Dados residuais após handshake: " . strlen($remaining) . " bytes");
                         $this->processData($conn, $remaining);
                     }
                 } else {
@@ -92,13 +89,12 @@ class WebsocketServer
             });
         });
 
-        // Ping a cada 25 segundos
+        // Ping periódico
         $loop->addPeriodicTimer(25, function () {
             foreach (self::$clients as $deviceId => $client) {
                 try {
-                    $client->write(self::encodeWebSocketFrame('', 0x9)); // Ping
+                    $client->write(self::encodeWebSocketFrame('', 0x9));
                 } catch (Exception $e) {
-                    self::$logger->error("Erro ping para {$deviceId}");
                     $this->removeClient($client, $deviceId);
                 }
             }
@@ -113,50 +109,46 @@ class WebsocketServer
         $connId = spl_object_id($conn);
 
         if (isset(self::$pending[$connId])) {
-            self::$logger->info("Processando mensagem de identificação (tamanho: " . strlen($data) . " bytes)");
+            self::$logger->info("Dados recebidos em pending (tamanho: " . strlen($data) . " bytes)");
 
+            // Tentativa mais tolerante de decodificação
             $payload = $this->decodeTextFrame($data);
 
             if ($payload && isset($payload['command']) && $payload['command'] === 'identify') {
                 $deviceId = trim($payload['device'] ?? '');
 
                 if (empty($deviceId)) {
-                    self::$logger->error("Device ID vazio na identificação");
+                    self::$logger->error("Device ID vazio");
                     $conn->close();
                     return;
                 }
 
                 if (isset(self::$clients[$deviceId])) {
-                    self::$logger->error("Device {$deviceId} já conectado. Rejeitando duplicata.");
-                    $conn->write(self::encodeWebSocketFrame(json_encode([
-                        'status' => 'error',
-                        'message' => 'Device already connected'
-                    ]), 0x1));
+                    self::$logger->error("Device duplicado: {$deviceId}");
+                    $conn->write(self::encodeWebSocketFrame(json_encode(['status' => 'error', 'message' => 'Device already connected']), 0x1));
                     $conn->close();
                     return;
                 }
 
-                // Registra definitivamente
                 self::$clients[$deviceId] = $conn;
                 unset(self::$pending[$connId]);
 
                 self::$logger->info("✅ Device identificado com sucesso: {$deviceId}");
 
-                // Envia confirmação
                 $conn->write(self::encodeWebSocketFrame(json_encode([
                     'status' => 'identified',
                     'device' => $deviceId
                 ]), 0x1));
 
-                self::$logger->info("Confirmação 'identified' enviada para {$deviceId}");
+                self::$logger->info("Resposta 'identified' enviada para {$deviceId}");
             } else {
-                self::$logger->warning("Mensagem inválida antes da identificação. Payload recebido: " . substr(json_encode($payload), 0, 300));
+                self::$logger->warning("Mensagem inválida ou não decodificada como identify. Dados: " . bin2hex(substr($data, 0, 100)));
                 $conn->close();
             }
             return;
         }
 
-        // Cliente já identificado → mensagem normal
+        // Cliente já identificado
         if (!empty($data)) {
             $this->websocketMessage->sendMessage($conn, self::$clients, $data);
         }
@@ -164,19 +156,17 @@ class WebsocketServer
 
     private function decodeTextFrame(string $frame): ?array
     {
-        if (strlen($frame) < 2) {
-            return null;
-        }
+        if (strlen($frame) < 2) return null;
 
         try {
-            $decoded = $this->decodeWebSocketFrame($frame); // método do trait WebSocketUtils
+            $decoded = $this->decodeWebSocketFrame($frame);
 
             if (isset($decoded['opcode']) && $decoded['opcode'] === 0x1 && !empty($decoded['payload'])) {
                 $json = json_decode($decoded['payload'], true);
                 return is_array($json) ? $json : null;
             }
         } catch (Exception $e) {
-            self::$logger->debug("Falha ao decodificar frame: " . $e->getMessage());
+            self::$logger->debug("Erro decode frame: " . $e->getMessage());
         }
         return null;
     }
@@ -184,10 +174,7 @@ class WebsocketServer
     private function cleanupConnection(ConnectionInterface $conn): void
     {
         $connId = spl_object_id($conn);
-
-        if (isset(self::$pending[$connId])) {
-            unset(self::$pending[$connId]);
-        }
+        unset(self::$pending[$connId]);
 
         $deviceId = array_search($conn, self::$clients, true);
         if ($deviceId !== false) {
@@ -205,17 +192,11 @@ class WebsocketServer
     private function consumeMessages($loop): void
     {
         $loop->addPeriodicTimer(1, function () {
-            try {
-                if (empty(self::$clients)) return;
-
-                $devices = array_keys(self::$clients);
-                $integrations = $this->integrationService->getWebsocketOpen($devices);
-
-                foreach ($integrations as $integration) {
-                    $this->sendToClient($integration);
-                }
-            } catch (Exception $e) {
-                self::$logger->error("Erro ao consumir mensagens: " . $e->getMessage());
+            if (empty(self::$clients)) return;
+            $devices = array_keys(self::$clients);
+            $integrations = $this->integrationService->getWebsocketOpen($devices);
+            foreach ($integrations as $integration) {
+                $this->sendToClient($integration);
             }
         });
     }
@@ -232,7 +213,7 @@ class WebsocketServer
                 $client->write($frame);
                 $this->integrationService->setDelivered($integration);
             } catch (Exception $e) {
-                self::$logger->error("Erro ao enviar para {$deviceId}: " . $e->getMessage());
+                self::$logger->error("Erro envio para {$deviceId}: " . $e->getMessage());
                 $this->removeClient($client, $deviceId);
                 $this->integrationService->setError($integration);
             }
