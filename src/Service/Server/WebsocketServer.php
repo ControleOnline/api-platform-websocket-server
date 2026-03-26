@@ -4,6 +4,7 @@ namespace ControleOnline\Service\Server;
 
 use ControleOnline\Entity\Integration;
 use ControleOnline\Service\IntegrationService;
+use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Service\LoggerService;
 use ControleOnline\Utils\WebSocketUtils;
 use ControleOnline\Service\Server\WebsocketMessage;
@@ -16,11 +17,12 @@ class WebsocketServer
 {
     use WebSocketUtils;
 
-    private static array $clients = [];           // deviceId => ConnectionInterface
-    private static array $pending = [];           // connId => ConnectionInterface
+    private static array $clients = [];   // deviceId => ConnectionInterface
+    private static array $pending = [];   // connId => ConnectionInterface
 
     public function __construct(
         private WebsocketMessage $websocketMessage,
+        private WebsocketClient $websocketClient,        // ← Devolvido
         private IntegrationService $integrationService,
         private LoggerService $loggerService
     ) {
@@ -61,7 +63,6 @@ class WebsocketServer
                     $conn->write($response);
                     $handshakeDone = true;
 
-                    // Remove headers do buffer (deixa apenas dados WebSocket, se vier junto)
                     $pos = strpos($buffer, "\r\n\r\n") + 4;
                     $remaining = substr($buffer, $pos);
                     $buffer = '';
@@ -90,7 +91,7 @@ class WebsocketServer
             });
         });
 
-        // Ping a cada 30 segundos
+        // Ping a cada 30 segundos para manter conexões vivas
         $loop->addPeriodicTimer(30, function () {
             foreach (self::$clients as $deviceId => $client) {
                 try {
@@ -110,7 +111,7 @@ class WebsocketServer
     {
         $connId = spl_object_id($conn);
 
-        // Ainda está aguardando identificação
+        // Ainda aguardando identificação
         if (isset(self::$pending[$connId])) {
             $payload = $this->decodeTextFrame($data);
 
@@ -123,7 +124,6 @@ class WebsocketServer
                     return;
                 }
 
-                // Verifica conexão duplicada
                 if (isset(self::$clients[$deviceId])) {
                     self::$logger->error("Conexão duplicada para device: $deviceId");
                     $conn->write(self::encodeWebSocketFrame(json_encode([
@@ -134,38 +134,35 @@ class WebsocketServer
                     return;
                 }
 
-                // Registra o cliente
+                // Registra o cliente definitivamente
                 self::$clients[$deviceId] = $conn;
                 unset(self::$pending[$connId]);
 
                 self::$logger->info("Device identificado com sucesso: $deviceId");
 
-                // Confirmação para o client
+                // Confirmação para o frontend
                 $conn->write(self::encodeWebSocketFrame(json_encode([
                     'status' => 'identified',
                     'device' => $deviceId
                 ]), 0x1));
 
-                // Se veio payload extra junto
+                // Se veio dados extras junto com o identify
                 if (!empty($payload['data'])) {
                     $this->websocketMessage->sendMessage($conn, self::$clients, json_encode($payload['data']));
                 }
             } else {
-                self::$logger->warning("Mensagem inválida antes da identificação. Fechando conexão.");
+                self::$logger->warning("Mensagem recebida antes da identificação. Fechando conexão.");
                 $conn->close();
             }
             return;
         }
 
-        // Cliente já identificado → processa mensagem normal
+        // Cliente já identificado → repassa mensagem normal
         if (!empty($data)) {
             $this->websocketMessage->sendMessage($conn, self::$clients, $data);
         }
     }
 
-    /**
-     * Decodifica frame WebSocket de texto (opcode 1) simples
-     */
     private function decodeTextFrame(string $frame): ?array
     {
         if (strlen($frame) < 2) return null;
@@ -173,12 +170,12 @@ class WebsocketServer
         try {
             $decoded = $this->decodeWebSocketFrame($frame); // método do trait WebSocketUtils
 
-            if (isset($decoded['opcode']) && $decoded['opcode'] === 0x1 && isset($decoded['payload'])) {
+            if (isset($decoded['opcode']) && $decoded['opcode'] === 0x1 && !empty($decoded['payload'])) {
                 $json = json_decode($decoded['payload'], true);
                 return is_array($json) ? $json : null;
             }
         } catch (Exception $e) {
-            // Frame incompleto ou inválido
+            // Frame incompleto ou erro de decodificação
         }
         return null;
     }
@@ -227,20 +224,27 @@ class WebsocketServer
 
     private function sendToClient(Integration $integration): void
     {
-        $deviceId = $integration->getDevice()->getDevice();
+        $device = $integration->getDevice();
+        $deviceId = $device->getDevice();
         $message = $integration->getBody();
+
+        self::$logger->info("Tentando enviar mensagem para device: $deviceId");
 
         if (isset(self::$clients[$deviceId])) {
             $client = self::$clients[$deviceId];
             try {
                 $frame = self::encodeWebSocketFrame($message, 0x1);
                 $client->write($frame);
+
                 $this->integrationService->setDelivered($integration);
+                self::$logger->info("Mensagem enviada com sucesso para $deviceId");
             } catch (Exception $e) {
                 self::$logger->error("Erro ao enviar mensagem para $deviceId: " . $e->getMessage());
                 $this->removeClient($client, $deviceId);
                 $this->integrationService->setError($integration);
             }
+        } else {
+            self::$logger->error("Device $deviceId não está conectado no momento.");
         }
     }
 }
