@@ -37,7 +37,7 @@ class WebsocketMessage
         if (json_last_error() !== JSON_ERROR_NONE) {
             self::$logger->error(
                 "Servidor: JSON inválido: " . json_last_error_msg() .
-                    " | Payload (hex): " . bin2hex($decodedMessage)
+                " | Payload (hex): " . bin2hex($decodedMessage)
             );
             return;
         }
@@ -67,7 +67,7 @@ class WebsocketMessage
                     } else {
                         self::$logger->error(
                             "Servidor: Dispositivo com ID {$deviceId} não está conectado ou não é ConnectionInterface. " .
-                                "Tipo: " . gettype($clients[$deviceId] ?? 'não existe')
+                            "Tipo: " . gettype($clients[$deviceId] ?? 'não existe')
                         );
                         return;
                     }
