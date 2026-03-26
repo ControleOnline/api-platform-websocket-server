@@ -41,7 +41,6 @@ trait WebSocketUtils
 
     public static function generateHandshakeResponse(array $headers): ?string
     {
-        unset($headers['sec-websocket-extensions']);
         if (
             !isset($headers['upgrade']) || strtolower($headers['upgrade']) !== 'websocket' ||
             !isset($headers['connection']) || strtolower($headers['connection']) !== 'upgrade' ||
@@ -96,34 +95,34 @@ trait WebSocketUtils
         return pack('C*', ...$frameHead) . ($mask ? $maskingKey : '') . $maskedPayload;
     }
 
-    public static function decodeWebSocketFrame(string $data): ?string
+    public static function decodeWebSocketFrame(string $data): ?array
     {
-        self::$logger->error('Decodificando frame WebSocket: ' . bin2hex($data));
-        $unmaskedPayload = '';
         $payloadOffset = 2;
         $masked = (ord($data[1]) >> 7) & 0x1;
         $payloadLength = ord($data[1]) & 0x7F;
 
         if ($payloadLength === 126) {
-            $payloadOffset = 4;
             $payloadLength = unpack('n', substr($data, 2, 2))[1];
+            $payloadOffset = 4;
         } elseif ($payloadLength === 127) {
+            $payloadLength = unpack('J', substr($data, 2, 8))[1] ?? 0; // compatibilidade
             $payloadOffset = 10;
-            $payloadLength = unpack('J', substr($data, 2, 8))[1];
         }
 
+        $payload = '';
         if ($masked) {
             $maskingKey = substr($data, $payloadOffset, 4);
             $payloadOffset += 4;
             for ($i = 0; $i < $payloadLength; $i++) {
-                $unmaskedPayload .= $data[$payloadOffset + $i] ^ $maskingKey[$i % 4];
+                $payload .= $data[$payloadOffset + $i] ^ $maskingKey[$i % 4];
             }
         } else {
-            $unmaskedPayload = substr($data, $payloadOffset, $payloadLength);
+            $payload = substr($data, $payloadOffset, $payloadLength);
         }
 
-        self::$logger->error('Payload decodificado (hex): ' . bin2hex($unmaskedPayload));
-        self::$logger->error('Payload decodificado: ' . $unmaskedPayload);
-        return $unmaskedPayload;
+        return [
+            'opcode' => ord($data[0]) & 0x0F,
+            'payload' => $payload,
+        ];
     }
 }
