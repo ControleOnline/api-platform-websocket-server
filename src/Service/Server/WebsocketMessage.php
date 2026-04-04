@@ -21,23 +21,20 @@ class WebsocketMessage
     /**
      * Envia uma mensagem recebida para os clientes destino
      */
-    public function sendMessage(ConnectionInterface $sender, array $clients, string $frame): void
+    public function sendMessage(ConnectionInterface $sender, array $clients, string $payload): void
     {
-        self::$logger->error("Servidor: Recebido frame para broadcast (hex): " . bin2hex($frame));
-
-        $decodedMessage = $this->decodeWebSocketFrame($frame);
-        if (!is_string($decodedMessage)) {
-            self::$logger->error("Servidor: Frame decodificado não é string. Ignorando.");
+        if ($payload === '') {
+            self::$logger->error("Servidor: Payload vazio recebido para broadcast.");
             return;
         }
 
-        self::$logger->error("Servidor: Mensagem decodificada (string): $decodedMessage");
+        self::$logger->error("Servidor: Mensagem decodificada (string): $payload");
 
-        $messageData = json_decode($decodedMessage, true);
+        $messageData = json_decode($payload, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             self::$logger->error(
                 "Servidor: JSON inválido: " . json_last_error_msg() .
-                    " | Payload (hex): " . bin2hex($decodedMessage)
+                    " | Payload (hex): " . bin2hex($payload)
             );
             return;
         }
@@ -62,7 +59,7 @@ class WebsocketMessage
                     self::$logger->error("Servidor: ID do dispositivo retornado: {$deviceId}");
 
                     if (is_string($deviceId) && isset($clients[$deviceId]) && $clients[$deviceId] instanceof ConnectionInterface) {
-                        $destination_devices = [$clients[$deviceId]];
+                        $destination_devices = [$deviceId => $clients[$deviceId]];
                         self::$logger->error("Servidor: Dispositivo encontrado em clients: {$deviceId}");
                     } else {
                         self::$logger->error(
@@ -83,14 +80,14 @@ class WebsocketMessage
         }
 
         self::$logger->error("Servidor: Enviando para " . count($destination_devices) . " clientes");
-        $encodedFrame = $this->encodeWebSocketFrame($decodedMessage);
+        $encodedFrame = $this->encodeWebSocketFrame($payload);
         $this->sendMessages($sender, $destination_devices, $encodedFrame);
     }
 
     /**
      * Envia o frame codificado para os clientes
      */
-    private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame)
+    private function sendMessages(ConnectionInterface $sender, array $clients, string $encodedFrame): void
     {
         self::$logger->error('Quantidade de clientes: ' . count($clients));
 

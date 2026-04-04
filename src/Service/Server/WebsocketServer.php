@@ -89,21 +89,46 @@ class WebsocketServer
     private function processData(ConnectionInterface $conn, string $data): void
     {
         $connId = spl_object_id($conn);
+        $decoded = self::decodeWebSocketFrame($data);
+
+        if (!$decoded) {
+            return;
+        }
+
+        $opcode = $decoded['opcode'] ?? null;
+        $payload = $decoded['payload'] ?? '';
+
+        if ($opcode === 0x8) {
+            $conn->close();
+            return;
+        }
+
+        if ($opcode === 0x9) {
+            $conn->write(self::encodeWebSocketFrame($payload, 0xA));
+            return;
+        }
+
+        if ($opcode === 0xA) {
+            return;
+        }
 
         if (isset(self::$pending[$connId])) {
-            $decoded = self::decodeWebSocketFrame($data);
-            if (!$decoded || $decoded['opcode'] !== 0x1) {
+            if ($opcode !== 0x1) {
                 $conn->close();
                 return;
             }
 
-            $payload = json_decode($decoded['payload'], true);
-            if (!isset($payload['command']) || $payload['command'] !== 'identify') {
+            $identifyPayload = json_decode($payload, true);
+            if (
+                json_last_error() !== JSON_ERROR_NONE ||
+                !isset($identifyPayload['command']) ||
+                $identifyPayload['command'] !== 'identify'
+            ) {
                 $conn->close();
                 return;
             }
 
-            $deviceId = trim($payload['device'] ?? '');
+            $deviceId = trim((string) ($identifyPayload['device'] ?? ''));
             if (!$deviceId || isset(self::$clients[$deviceId])) {
                 $conn->write(self::encodeWebSocketFrame(json_encode([
                     'status' => 'error',
@@ -123,8 +148,11 @@ class WebsocketServer
             return;
         }
 
-        // Cliente já identificado
-        $this->websocketMessage->sendMessage($conn, self::$clients, $data);
+        if ($opcode !== 0x1) {
+            return;
+        }
+
+        $this->websocketMessage->sendMessage($conn, self::$clients, $payload);
     }
 
     private function cleanupConnection(ConnectionInterface $conn): void
