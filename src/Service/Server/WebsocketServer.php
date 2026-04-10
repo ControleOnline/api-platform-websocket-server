@@ -129,13 +129,24 @@ class WebsocketServer
             }
 
             $deviceId = trim((string) ($identifyPayload['device'] ?? ''));
-            if (!$deviceId || isset(self::$clients[$deviceId])) {
+            if (!$deviceId) {
                 $conn->write(self::encodeWebSocketFrame(json_encode([
                     'status' => 'error',
-                    'message' => $deviceId ? 'Device already connected' : 'Device ID vazio'
+                    'message' => 'Device ID vazio'
                 ]), 0x1));
                 $conn->close();
                 return;
+            }
+
+            if (isset(self::$clients[$deviceId]) && self::$clients[$deviceId] !== $conn) {
+                $previousConnection = self::$clients[$deviceId];
+                unset(self::$clients[$deviceId]);
+
+                try {
+                    $previousConnection->close();
+                } catch (\Throwable $e) {
+                    self::$logger->error("Falha ao substituir conexao anterior de {$deviceId}: " . $e->getMessage());
+                }
             }
 
             self::$clients[$deviceId] = $conn;
