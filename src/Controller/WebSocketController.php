@@ -7,6 +7,7 @@ use ControleOnline\Service\DeviceService;
 use ControleOnline\Service\Client\WebsocketClient;
 use Doctrine\ORM\EntityManagerInterface;
 use ControleOnline\Service\HydratorService;
+use ControleOnline\Service\RequestPayloadService;
 use Exception;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -22,13 +23,14 @@ class WebSocketController extends AbstractController
         private DeviceService $deviceService,
         private WebsocketClient $websocketClient,
         private HydratorService $hydratorService,
+        private RequestPayloadService $requestPayloadService,
 
     ) {}
     #[Route('/websocket', name: "websocket", methods: ["POST"])]
     public function sendMessage(Request $request): JsonResponse
     {
         try {
-            $data = json_decode($request->getContent(), true);
+            $data = $this->requestPayloadService->decodeJsonContent($request->getContent());
             $device = $this->deviceService->discoveryDevice($data['destination']);
             $integration = $this->websocketClient->push($device, json_encode($data));
 
