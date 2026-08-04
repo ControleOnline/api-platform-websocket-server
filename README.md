@@ -3,13 +3,11 @@
 # websocket-server
 
 
-`composer require controleonline/websocket-server:dev-master`
+## Instalacao
+[Instalacao na wiki](https://github.com/ControleOnline/api-platform-websocket-server/wiki/Instalacao)
 
+## Links obrigatorios
 
-Add Service import:
-config\services.yaml
-
-```yaml
-imports:
-    - { resource: "../modules/controleonline/websocket-server/config/services/services.yaml" }    
-```
+- [Documentacao para clientes](http://ajuda.controleonline.com/)
+- [Site institucional](http://controleonline.com/)
+- [Wiki tecnica](https://github.com/ControleOnline/api-platform-websocket-server/wiki)
