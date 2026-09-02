@@ -31,7 +31,22 @@ class WebsocketServer
     {
         self::$logger->info("Servidor WebSocket iniciado no processo " . getmypid() . " em {$bind}:{$port}");
         $loop = Loop::get();
-        $socket = new SocketServer($bind . ':' . $port, [], $loop);
+        try {
+            $socket = new SocketServer($bind . ':' . $port, [], $loop);
+        } catch (\Throwable $e) {
+            $message = $e->getMessage();
+            if (
+                stripos($message, 'Address already in use') !== false
+                || stripos($message, 'EADDRINUSE') !== false
+            ) {
+                self::$logger->info(
+                    "WebSocket já escuta em {$bind}:{$port}; instância extra ignorada (pid " . getmypid() . "). {$message}"
+                );
+                return;
+            }
+
+            throw $e;
+        }
 
         $socket->on('connection', function (ConnectionInterface $conn) {
             $handshakeDone = false;
