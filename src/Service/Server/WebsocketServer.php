@@ -24,7 +24,7 @@ class WebsocketServer
         private WebsocketClient $websocketClient,
         private IntegrationService $integrationService,
         private LoggerService $loggerService,
-        private EntityManagerInterface $entityManager
+        private ?EntityManagerInterface $entityManager = null
     ) {
         self::$logger = $loggerService->getLogger('websocket');
     }
@@ -198,6 +198,10 @@ class WebsocketServer
                 // The TCP socket remains open, but the tenant DB connection
                 // must be released after each poll so one process does not
                 // reserve a connection indefinitely.
+                if (!$this->entityManager) {
+                    return;
+                }
+
                 $connection = $this->entityManager->getConnection();
                 if (!$connection->isTransactionActive()) {
                     $this->entityManager->clear();
