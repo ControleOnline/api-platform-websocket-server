@@ -7,6 +7,7 @@ use ControleOnline\Service\IntegrationService;
 use ControleOnline\Service\Client\WebsocketClient;
 use ControleOnline\Service\LoggerService;
 use ControleOnline\Utils\WebSocketUtils;
+use Doctrine\ORM\EntityManagerInterface;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
 use React\Socket\SocketServer;
@@ -22,7 +23,8 @@ class WebsocketServer
         private WebsocketMessage $websocketMessage,
         private WebsocketClient $websocketClient,
         private IntegrationService $integrationService,
-        private LoggerService $loggerService
+        private LoggerService $loggerService,
+        private EntityManagerInterface $entityManager
     ) {
         self::$logger = $loggerService->getLogger('websocket');
     }
@@ -200,11 +202,24 @@ class WebsocketServer
     private function consumeMessages($loop): void
     {
         $loop->addPeriodicTimer(1, function () {
-            if (!self::$clients) return;
-            $devices = array_keys(self::$clients);
-            $integrations = $this->integrationService->getWebsocketOpen($devices);
-            foreach ($integrations as $integration) {
-                $this->sendToClient($integration);
+            try {
+                if (!self::$clients) return;
+                $devices = array_keys(self::$clients);
+                $integrations = $this->integrationService->getWebsocketOpen($devices);
+                foreach ($integrations as $integration) {
+                    $this->sendToClient($integration);
+                }
+            } finally {
+                // The TCP socket remains open, but the tenant DB connection
+                // must be released after each poll so one process does not
+                // reserve a connection indefinitely.
+                $connection = $this->entityManager->getConnection();
+                if (!$connection->isTransactionActive()) {
+                    $this->entityManager->clear();
+                    if ($connection->isConnected()) {
+                        $connection->close();
+                    }
+                }
             }
         });
     }
