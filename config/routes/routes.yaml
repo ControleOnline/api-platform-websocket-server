@@ -1,0 +1,3 @@
+controleonline_websocket_server:
+    resource: ../../src/Controller/
+    type: attribute
