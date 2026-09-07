@@ -44,7 +44,7 @@ class WebSocketServerCommand extends DefaultCommand
         parent::__construct('websocket:start');
     }
 
-    protected function configure()
+    protected function configure(): void
     {
         $this->addOption('port', ['p'], InputOption::VALUE_OPTIONAL,  'Websocket Port');
         $this->addOption('bind', ['b'], InputOption::VALUE_OPTIONAL,  'Websocket Bind IP');
