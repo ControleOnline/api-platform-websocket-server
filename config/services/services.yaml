@@ -22,7 +22,3 @@ services:
     ControleOnline\Filter\:
         resource: '../../src/Filter'
         public: true
-    ControleOnline\Message\Websocket\PushMessage:
-        autowire: false
-        autoconfigure: false
-        public: false
