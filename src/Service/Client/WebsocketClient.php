@@ -14,6 +14,11 @@ class WebsocketClient
         private IntegrationService $integrationService
     ) {}
 
+    public function pushMany(array $devices, string $message): array
+    {
+        return $this->integrationService->addDeviceIntegrations($message, 'Websocket', $devices);
+    }
+
     public function push(Device $device, string $message): Integration
     {
         return $this->integrationService->addIntegration($message, 'Websocket', $device);
