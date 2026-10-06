@@ -1,0 +1,13 @@
+{
+  "version": "1.0.2",
+  "rc": 2,
+  "branch": "rc/1.0.2-rc.2",
+  "baseMaster": "d7d481542dae6e3ae92bdcb321afcfa821bf93a7",
+  "tasks": [
+    167
+  ],
+  "repositories": {
+    "ControleOnline/api-platform-websocket-server": "97260253dd441f920cf40533dc113d4c4e498b23"
+  },
+  "frozen": true
+}
